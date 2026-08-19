@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import { status as HttpStatus } from "http-status";
-import { UserRole, UserStatus, type Facility } from "~/generated/prisma/client";
+import { UserRole, UserStatus } from "~/generated/prisma/client";
 import { hashedPass, comparePassword } from "~/lib/bycrpt";
 import prisma from "~/lib/db";
 import {
@@ -12,6 +12,7 @@ import { createToken } from "~/lib/jwt";
 import logger from "~/lib/logger";
 import { normalizeTeamPermissions } from "~/lib/permissions";
 import { HttpError } from "~/middlewares/error-handler";
+import { publicFacilityAccount } from "~/services/me-service";
 import type {
   CreateAdminBody,
   ForgotPasswordBody,
@@ -36,30 +37,6 @@ function publicUser<T extends { passwordHash?: string | null; permissions?: stri
 
 function generateOtp() {
   return randomInt(1000, 10000).toString();
-}
-
-function splitManagerName(managerName: string) {
-  const parts = managerName.trim().split(/\s+/).filter(Boolean);
-  return {
-    firstName: parts[0] ?? managerName,
-    lastName: parts.slice(1).join(" "),
-  };
-}
-
-function publicFacilityAccount(facility: Facility) {
-  const { firstName, lastName } = splitManagerName(facility.managerName);
-  return {
-    id: facility.id,
-    firstName,
-    lastName,
-    email: facility.email,
-    phone: facility.phone,
-    avatarUrl: null,
-    role: UserRole.FACILITY_MANAGER,
-    status: facility.status,
-    createdAt: facility.createdAt,
-    updatedAt: facility.updatedAt,
-  };
 }
 
 function inviteError() {

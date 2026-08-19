@@ -78,6 +78,8 @@ model Facility {
   passwordHash  String?
   location      String
   phone         String
+  avatarUrl      String?
+  avatarPublicId String?
   status        UserStatus @default(ACTIVE)
   invitedAt     DateTime   @default(now())
   passwordSetAt DateTime?

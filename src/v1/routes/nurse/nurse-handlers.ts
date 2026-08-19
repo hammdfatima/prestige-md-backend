@@ -1,6 +1,7 @@
 import { status as HttpStatus } from "http-status";
 import { ZodError } from "zod";
 import { asyncHandler } from "~/lib/async-handler";
+import { getAuthUser } from "~/middlewares/auth";
 import {
   createNurseSchema,
   type ListNursesQuery,
@@ -34,7 +35,7 @@ export const listNursesHandler = asyncHandler<
   Record<string, never>,
   ListNursesQuery
 >(async (req, res) => {
-  const data = await nurseService.listNurses(req.query);
+  const data = await nurseService.listNursesForViewer(getAuthUser(req), req.query);
   return res.status(HttpStatus.OK).json({
     message: "Nurses fetched successfully",
     data,

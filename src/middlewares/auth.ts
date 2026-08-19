@@ -34,11 +34,38 @@ export function requireAuth(...roles: UserRole[]) {
         },
       });
 
-      if (!user || user.status !== UserStatus.ACTIVE) {
+      if (user) {
+        if (user.status !== UserStatus.ACTIVE) {
+          throw new HttpError("Authentication required", HttpStatus.UNAUTHORIZED);
+        }
+
+        if (roles.length > 0 && !roles.includes(user.role)) {
+          throw new HttpError(
+            "You do not have access to this resource",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+
+        (req as IAuthRequest).user = {
+          id: user.id,
+          role: user.role,
+          permissions: normalizeTeamPermissions(user.permissions),
+          facilityId: user.facilityId ?? user.facilityLinks[0]?.facilityId ?? null,
+        };
+        next();
+        return;
+      }
+
+      const facility = await prisma.facility.findUnique({
+        where: { id: payload.id },
+        select: { id: true, status: true },
+      });
+
+      if (!facility || facility.status !== UserStatus.ACTIVE) {
         throw new HttpError("Authentication required", HttpStatus.UNAUTHORIZED);
       }
 
-      if (roles.length > 0 && !roles.includes(user.role)) {
+      if (roles.length > 0 && !roles.includes(UserRole.FACILITY_MANAGER)) {
         throw new HttpError(
           "You do not have access to this resource",
           HttpStatus.FORBIDDEN,
@@ -46,10 +73,9 @@ export function requireAuth(...roles: UserRole[]) {
       }
 
       (req as IAuthRequest).user = {
-        id: user.id,
-        role: user.role,
-        permissions: normalizeTeamPermissions(user.permissions),
-        facilityId: user.facilityId ?? user.facilityLinks[0]?.facilityId ?? null,
+        id: facility.id,
+        role: UserRole.FACILITY_MANAGER,
+        facilityId: facility.id,
       };
       next();
     } catch (error) {
@@ -109,8 +135,11 @@ export const requireNurse = requireAuth(UserRole.NURSE);
 
 export const requireDoctor = requireAuth(UserRole.DOCTOR);
 
+export const requireFacilityManager = requireAuth(UserRole.FACILITY_MANAGER);
+
 export const requirePatientRead = requireAuth(
   UserRole.ADMIN,
   UserRole.TEAM_MEMBER,
   UserRole.NURSE,
+  UserRole.FACILITY_MANAGER,
 );

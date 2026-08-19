@@ -39,6 +39,8 @@ export const updateMeSchema = z.object({
   yearsExperience: z.string().optional(),
   primaryLanguage: z.string().optional(),
   availability: z.string().optional(),
+  location: z.string().optional(),
+  facilityName: z.string().optional(),
 });
 
 export const updateAvailabilitySchema = z.object({

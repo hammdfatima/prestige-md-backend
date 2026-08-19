@@ -13,12 +13,16 @@ import type {
   ListProvidersQuery,
 } from "~/schemas/provider-schemas";
 import { emitProviderAvailability } from "~/lib/socket";
+import type { TokenPayload } from "~/types";
 
 type ProviderRecord = User & {
   facility: { id: string; name: string } | null;
   facilityLinks: Array<{
     facility: { id: string; name: string };
   }>;
+  _count?: {
+    visitsAsProvider: number;
+  };
 };
 
 function splitName(name: string) {
@@ -30,8 +34,12 @@ function splitName(name: string) {
 }
 
 function publicProvider(provider: ProviderRecord) {
-  const { passwordHash: _passwordHash, facilityLinks, ...safeProvider } =
-    provider;
+  const {
+    passwordHash: _passwordHash,
+    facilityLinks,
+    _count,
+    ...safeProvider
+  } = provider;
   const facilities = facilityLinks.map((link) => link.facility);
 
   return {
@@ -40,6 +48,7 @@ function publicProvider(provider: ProviderRecord) {
     facilities,
     facilityIds: facilities.map((facility) => facility.id),
     facilityName: facilities.map((facility) => facility.name).join(", ") || null,
+    visitCount: _count?.visitsAsProvider ?? 0,
   };
 }
 
@@ -48,6 +57,7 @@ const providerInclude = {
   facilityLinks: {
     include: { facility: { select: { id: true, name: true } } },
   },
+  _count: { select: { visitsAsProvider: true } },
 } as const;
 
 async function sendProviderInvite(provider: ProviderRecord) {
@@ -198,6 +208,37 @@ export async function listProviders(query: ListProvidersQuery) {
   });
 
   return providers.map(publicProvider);
+}
+
+export async function listProvidersForViewer(
+  auth: TokenPayload,
+  query: ListProvidersQuery,
+) {
+  if (auth.role === UserRole.ADMIN) {
+    return listProviders(query);
+  }
+
+  if (auth.role === UserRole.TEAM_MEMBER) {
+    if (!(auth.permissions ?? []).includes("manage_doctors")) {
+      throw new HttpError(
+        "You do not have access to this resource",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return listProviders(query);
+  }
+
+  if (auth.role === UserRole.FACILITY_MANAGER) {
+    if (!auth.facilityId) {
+      return [];
+    }
+    return listProviders({ ...query, facilityId: auth.facilityId });
+  }
+
+  throw new HttpError(
+    "You do not have access to this resource",
+    HttpStatus.FORBIDDEN,
+  );
 }
 
 async function getProviderOrThrow(id: string) {

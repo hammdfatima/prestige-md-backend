@@ -31,15 +31,16 @@ PROVIDER_ROUTER.get(
   listAvailableProvidersHandler,
 );
 
-PROVIDER_ROUTER.use(requireAdmin, requirePermission("manage_doctors"));
-
-PROVIDER_ROUTER.post("/", createProviderHandler);
-
 PROVIDER_ROUTER.get(
   "/",
+  requireAuth(UserRole.ADMIN, UserRole.TEAM_MEMBER, UserRole.FACILITY_MANAGER),
   schemaParseMiddleWare(listProvidersQuerySchema, "query"),
   listProvidersHandler,
 );
+
+PROVIDER_ROUTER.use(requireAdmin, requirePermission("manage_doctors"));
+
+PROVIDER_ROUTER.post("/", createProviderHandler);
 
 PROVIDER_ROUTER.patch(
   "/:id/block",

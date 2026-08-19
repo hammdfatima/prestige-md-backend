@@ -19,7 +19,15 @@ const visitInclude = {
   patient: { include: patientInclude },
   provider: true,
   bookedBy: {
-    select: { id: true, firstName: true, lastName: true },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      avatarUrl: true,
+      email: true,
+      phone: true,
+      employeeId: true,
+    },
   },
 } as const;
 
@@ -53,7 +61,15 @@ function publicVisit(visit: {
   createdAt: Date;
   patient: Parameters<typeof publicPatient>[0];
   provider: User;
-  bookedBy: { id: string; firstName: string; lastName: string };
+  bookedBy: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    avatarUrl: string | null;
+    email: string;
+    phone: string | null;
+    employeeId: string | null;
+  };
 }) {
   return {
     id: visit.id,
@@ -67,12 +83,21 @@ function publicVisit(visit: {
     bookedBy: {
       id: visit.bookedBy.id,
       name: `${visit.bookedBy.firstName} ${visit.bookedBy.lastName}`.trim(),
+      avatarUrl: visit.bookedBy.avatarUrl,
+      email: visit.bookedBy.email,
+      phone: visit.bookedBy.phone,
+      employeeId: visit.bookedBy.employeeId,
     },
   };
 }
 
 function assertCanListVisits(auth: TokenPayload) {
-  if (auth.role === UserRole.ADMIN || auth.role === UserRole.NURSE || auth.role === UserRole.DOCTOR) {
+  if (
+    auth.role === UserRole.ADMIN ||
+    auth.role === UserRole.NURSE ||
+    auth.role === UserRole.DOCTOR ||
+    auth.role === UserRole.FACILITY_MANAGER
+  ) {
     return;
   }
 
@@ -128,18 +153,26 @@ export async function createVisit(auth: TokenPayload, input: CreateVisitBody) {
 export async function listVisits(auth: TokenPayload, query: ListVisitsQuery) {
   assertCanListVisits(auth);
 
-  if (auth.role === UserRole.NURSE && !auth.facilityId) {
+  if (
+    (auth.role === UserRole.NURSE || auth.role === UserRole.FACILITY_MANAGER) &&
+    !auth.facilityId
+  ) {
     return [];
   }
 
-  if (query.patientId && auth.role === UserRole.NURSE) {
+  if (
+    query.patientId &&
+    (auth.role === UserRole.NURSE || auth.role === UserRole.FACILITY_MANAGER)
+  ) {
     await getPatientForViewer(auth, query.patientId);
   }
 
   const where = {
     ...(query.patientId ? { patientId: query.patientId } : {}),
     ...(auth.role === UserRole.DOCTOR ? { providerId: auth.id } : {}),
-    ...(auth.role === UserRole.NURSE && auth.facilityId
+    ...((auth.role === UserRole.NURSE ||
+      auth.role === UserRole.FACILITY_MANAGER) &&
+    auth.facilityId
       ? { patient: { facilityId: auth.facilityId } }
       : {}),
   };
@@ -166,7 +199,8 @@ export async function getVisit(auth: TokenPayload, id: string) {
   }
 
   if (
-    auth.role === UserRole.NURSE &&
+    (auth.role === UserRole.NURSE ||
+      auth.role === UserRole.FACILITY_MANAGER) &&
     visit.patient.facilityId !== auth.facilityId
   ) {
     throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);

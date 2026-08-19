@@ -334,7 +334,11 @@ export async function getPatient(id: string) {
 }
 
 function assertCanReadPatients(auth: TokenPayload) {
-  if (auth.role === UserRole.ADMIN || auth.role === UserRole.NURSE) {
+  if (
+    auth.role === UserRole.ADMIN ||
+    auth.role === UserRole.NURSE ||
+    auth.role === UserRole.FACILITY_MANAGER
+  ) {
     return;
   }
 
@@ -351,13 +355,19 @@ function assertCanReadPatients(auth: TokenPayload) {
   );
 }
 
+function isFacilityScopedReader(auth: TokenPayload) {
+  return (
+    auth.role === UserRole.NURSE || auth.role === UserRole.FACILITY_MANAGER
+  );
+}
+
 export async function listPatientsForViewer(
   auth: TokenPayload,
   query: ListPatientsQuery,
 ) {
   assertCanReadPatients(auth);
 
-  if (auth.role === UserRole.NURSE) {
+  if (isFacilityScopedReader(auth)) {
     if (!auth.facilityId) {
       return [];
     }
@@ -372,7 +382,7 @@ export async function getPatientForViewer(auth: TokenPayload, id: string) {
   const patient = await getPatient(id);
 
   if (
-    auth.role === UserRole.NURSE &&
+    isFacilityScopedReader(auth) &&
     patient.facilityId !== auth.facilityId
   ) {
     throw new HttpError("Patient not found", HttpStatus.NOT_FOUND);

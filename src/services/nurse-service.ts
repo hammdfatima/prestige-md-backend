@@ -13,6 +13,7 @@ import {
 } from "~/lib/facility-invite";
 import { sendEmail } from "~/lib/mailer";
 import { HttpError } from "~/middlewares/error-handler";
+import type { TokenPayload } from "~/types";
 import type {
   CreateNurseBody,
   ListNursesQuery,
@@ -37,6 +38,29 @@ function publicNurse(nurse: NurseRecord) {
     name: `${nurse.firstName} ${nurse.lastName}`.trim(),
     facilityName: nurse.facility?.name ?? null,
   };
+}
+
+async function withPatientsManaged(nurses: NurseRecord[]) {
+  if (nurses.length === 0) {
+    return [];
+  }
+
+  const visits = await prisma.visit.findMany({
+    where: { bookedByUserId: { in: nurses.map((nurse) => nurse.id) } },
+    select: { bookedByUserId: true, patientId: true },
+  });
+
+  const patientsByNurse = new Map<string, Set<string>>();
+  for (const visit of visits) {
+    const patients = patientsByNurse.get(visit.bookedByUserId) ?? new Set();
+    patients.add(visit.patientId);
+    patientsByNurse.set(visit.bookedByUserId, patients);
+  }
+
+  return nurses.map((nurse) => ({
+    ...publicNurse(nurse),
+    patientsManaged: patientsByNurse.get(nurse.id)?.size ?? 0,
+  }));
 }
 
 const nurseInclude = {
@@ -184,7 +208,38 @@ export async function listNurses(query: ListNursesQuery) {
     orderBy: { createdAt: "desc" },
   });
 
-  return nurses.map(publicNurse);
+  return withPatientsManaged(nurses);
+}
+
+export async function listNursesForViewer(
+  auth: TokenPayload,
+  query: ListNursesQuery,
+) {
+  if (auth.role === UserRole.ADMIN) {
+    return listNurses(query);
+  }
+
+  if (auth.role === UserRole.TEAM_MEMBER) {
+    if (!(auth.permissions ?? []).includes("manage_nurses")) {
+      throw new HttpError(
+        "You do not have access to this resource",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return listNurses(query);
+  }
+
+  if (auth.role === UserRole.FACILITY_MANAGER) {
+    if (!auth.facilityId) {
+      return [];
+    }
+    return listNurses({ ...query, facilityId: auth.facilityId });
+  }
+
+  throw new HttpError(
+    "You do not have access to this resource",
+    HttpStatus.FORBIDDEN,
+  );
 }
 
 async function getNurseOrThrow(id: string) {

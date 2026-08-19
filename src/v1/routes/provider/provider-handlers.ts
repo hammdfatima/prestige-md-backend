@@ -1,6 +1,7 @@
 import { status as HttpStatus } from "http-status";
 import { ZodError } from "zod";
 import { asyncHandler } from "~/lib/async-handler";
+import { getAuthUser } from "~/middlewares/auth";
 import {
   createProviderSchema,
   type ListProvidersQuery,
@@ -42,7 +43,10 @@ export const listProvidersHandler = asyncHandler<
   Record<string, never>,
   ListProvidersQuery
 >(async (req, res) => {
-  const data = await providerService.listProviders(req.query);
+  const data = await providerService.listProvidersForViewer(
+    getAuthUser(req),
+    req.query,
+  );
   return res.status(HttpStatus.OK).json({
     message: "Providers fetched successfully",
     data,

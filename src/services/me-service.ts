@@ -1,5 +1,5 @@
 import { status as HttpStatus } from "http-status";
-import type { User } from "~/generated/prisma/client";
+import type { Facility, User } from "~/generated/prisma/client";
 import { hashedPass, comparePassword } from "~/lib/bycrpt";
 import prisma from "~/lib/db";
 import { HttpError } from "~/middlewares/error-handler";
@@ -39,6 +39,27 @@ function publicUser(user: UserWithFacility) {
   };
 }
 
+export function publicFacilityAccount(facility: Facility) {
+  const { firstName, lastName } = splitName(facility.managerName);
+  return {
+    id: facility.id,
+    firstName,
+    lastName,
+    name: facility.managerName,
+    email: facility.email,
+    phone: facility.phone,
+    avatarUrl: facility.avatarUrl,
+    avatarPublicId: facility.avatarPublicId,
+    role: UserRole.FACILITY_MANAGER,
+    status: facility.status,
+    facilityId: facility.id,
+    facilityName: facility.name,
+    location: facility.location,
+    createdAt: facility.createdAt,
+    updatedAt: facility.updatedAt,
+  };
+}
+
 async function getUserOrThrow(id: string) {
   const user = await prisma.user.findUnique({
     where: { id },
@@ -50,27 +71,104 @@ async function getUserOrThrow(id: string) {
   return user;
 }
 
+async function getFacilityOrThrow(id: string) {
+  const facility = await prisma.facility.findUnique({ where: { id } });
+  if (!facility) {
+    throw new HttpError("Authentication required", HttpStatus.UNAUTHORIZED);
+  }
+  return facility;
+}
+
+function assertCloudinaryUrl(url: string) {
+  if (!/^https?:\/\//i.test(url)) {
+    throw new HttpError(
+      "avatarUrl must be a Cloudinary HTTPS URL",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+}
+
+async function assertEmailAvailable(email: string, except?: { userId?: string; facilityId?: string }) {
+  const [emailUser, emailFacility] = await Promise.all([
+    prisma.user.findUnique({ where: { email } }),
+    prisma.facility.findUnique({ where: { email } }),
+  ]);
+
+  const userTaken = Boolean(emailUser && emailUser.id !== except?.userId);
+  const facilityTaken = Boolean(
+    emailFacility && emailFacility.id !== except?.facilityId,
+  );
+
+  if (userTaken || facilityTaken) {
+    throw new HttpError(
+      "An account with this email already exists",
+      HttpStatus.CONFLICT,
+    );
+  }
+}
+
 export async function getMe(auth: TokenPayload) {
+  if (auth.role === UserRole.FACILITY_MANAGER) {
+    const facility = await getFacilityOrThrow(auth.id);
+    return publicFacilityAccount(facility);
+  }
+
   const user = await getUserOrThrow(auth.id);
   return publicUser(user);
 }
 
+async function updateFacilityMe(auth: TokenPayload, input: UpdateMeBody) {
+  const facility = await getFacilityOrThrow(auth.id);
+  const email = input.email.trim().toLowerCase();
+
+  if (email !== facility.email) {
+    await assertEmailAvailable(email, { facilityId: facility.id });
+  }
+
+  let avatarUrl = facility.avatarUrl;
+  let avatarPublicId = facility.avatarPublicId;
+
+  if (input.avatarUrl?.trim()) {
+    const nextUrl = input.avatarUrl.trim();
+    assertCloudinaryUrl(nextUrl);
+    avatarUrl = nextUrl;
+    avatarPublicId = input.avatarPublicId?.trim() || avatarPublicId;
+  }
+
+  const facilityName = input.facilityName?.trim() || facility.name;
+  const location = input.location?.trim() || facility.location;
+
+  if (facilityName.length < 2) {
+    throw new HttpError("Facility name is required", HttpStatus.BAD_REQUEST);
+  }
+
+  const updated = await prisma.facility.update({
+    where: { id: facility.id },
+    data: {
+      managerName: input.name.trim(),
+      email,
+      phone: input.phone.trim(),
+      name: facilityName,
+      location,
+      avatarUrl,
+      avatarPublicId,
+    },
+  });
+
+  return publicFacilityAccount(updated);
+}
+
 export async function updateMe(auth: TokenPayload, input: UpdateMeBody) {
+  if (auth.role === UserRole.FACILITY_MANAGER) {
+    return updateFacilityMe(auth, input);
+  }
+
   const user = await getUserOrThrow(auth.id);
   const email = input.email.trim().toLowerCase();
   const { firstName, lastName } = splitName(input.name);
 
   if (email !== user.email) {
-    const [emailUser, emailFacility] = await Promise.all([
-      prisma.user.findUnique({ where: { email } }),
-      prisma.facility.findUnique({ where: { email } }),
-    ]);
-    if (emailUser || emailFacility) {
-      throw new HttpError(
-        "An account with this email already exists",
-        HttpStatus.CONFLICT,
-      );
-    }
+    await assertEmailAvailable(email, { userId: user.id });
   }
 
   let avatarUrl = user.avatarUrl;
@@ -78,12 +176,7 @@ export async function updateMe(auth: TokenPayload, input: UpdateMeBody) {
 
   if (input.avatarUrl?.trim()) {
     const nextUrl = input.avatarUrl.trim();
-    if (!/^https?:\/\//i.test(nextUrl)) {
-      throw new HttpError(
-        "avatarUrl must be a Cloudinary HTTPS URL",
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    assertCloudinaryUrl(nextUrl);
     avatarUrl = nextUrl;
     avatarPublicId = input.avatarPublicId?.trim() || avatarPublicId;
   }
@@ -161,6 +254,43 @@ export async function changePassword(
   auth: TokenPayload,
   input: ChangePasswordBody,
 ) {
+  if (auth.role === UserRole.FACILITY_MANAGER) {
+    const facility = await getFacilityOrThrow(auth.id);
+
+    if (!facility.passwordHash) {
+      throw new HttpError(
+        "Set your password from the invite link first",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (
+      !comparePassword({
+        password: input.currentPassword,
+        hash: facility.passwordHash,
+      })
+    ) {
+      throw new HttpError(
+        "Current password is incorrect",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (input.currentPassword === input.newPassword) {
+      throw new HttpError(
+        "New password must be different from your current password",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    await prisma.facility.update({
+      where: { id: facility.id },
+      data: { passwordHash: hashedPass(input.newPassword) },
+    });
+
+    return { id: facility.id };
+  }
+
   const user = await getUserOrThrow(auth.id);
 
   if (!user.passwordHash) {
