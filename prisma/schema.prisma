@@ -1,0 +1,287 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  TEAM_MEMBER
+  FACILITY_MANAGER
+  NURSE
+  DOCTOR
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum VisitStatus {
+  IN_QUEUE
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id             String     @id @default(uuid())
+  firstName      String
+  lastName       String
+  email          String     @unique
+  /// Set by the staff member after they accept the invite — not by admin
+  passwordHash   String?
+  phone          String?
+  avatarUrl      String?
+  avatarPublicId String?
+  employeeId     String?
+  role           UserRole
+  status         UserStatus @default(ACTIVE)
+  invitedAt      DateTime?
+  passwordSetAt  DateTime?
+  specialty      String?
+  medicalLicense String?
+  education      String?
+  yearsExperience String?
+  primaryLanguage String?
+  availability   String?
+  isAvailable    Boolean    @default(false)
+  /// Assigned only for TEAM_MEMBER. Main ADMIN has full access.
+  permissions    String[]   @default([])
+  facilityId     String?
+  facility       Facility?  @relation(fields: [facilityId], references: [id], onDelete: Restrict)
+  facilityLinks  UserFacility[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  emailOtps EmailOtp[]
+  patientsCreated Patient[]
+  medicationsCreated PatientMedication[]
+  visitsAsProvider Visit[] @relation("VisitProvider")
+  visitsBooked     Visit[] @relation("VisitBookedBy")
+
+  @@index([facilityId])
+  @@index([employeeId])
+  @@map("users")
+}
+
+model Facility {
+  id            String     @id @default(uuid())
+  name          String
+  managerName   String
+  email         String     @unique
+  /// Set by the facility manager after they accept the invite — not by admin
+  passwordHash  String?
+  location      String
+  phone         String
+  status        UserStatus @default(ACTIVE)
+  invitedAt     DateTime   @default(now())
+  passwordSetAt DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  staff User[]
+  staffLinks UserFacility[]
+  patients Patient[]
+
+  @@map("facilities")
+}
+
+model UserFacility {
+  userId     String
+  facilityId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Restrict)
+
+  @@id([userId, facilityId])
+  @@index([facilityId])
+  @@map("user_facilities")
+}
+
+model EmailOtp {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code       String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+  @@map("email_otps")
+}
+
+enum YesNoAnswer {
+  yes
+  no
+}
+
+enum AdlLevel {
+  I
+  S
+  A
+  T
+}
+
+enum SpecialDiet {
+  regular
+  calorie_controlled
+  no_added_salt
+  low_fat_low_cholesterol
+  other
+}
+
+enum MedicationAssistance {
+  self_administer
+  assistance_with_self_administration
+  medication_administration
+}
+
+enum ExaminerTitle {
+  MD
+  DO
+  APRN
+  PA
+}
+
+/// Residents do not log in. Admin (and later nurse/facility) create the chart.
+model Patient {
+  id             String @id @default(uuid())
+  memberId       String @unique
+  firstName      String
+  lastName       String
+  email          String?
+  phone          String
+  dateOfBirth    DateTime @db.Date
+  avatarUrl      String
+  avatarPublicId String?
+
+  authorizedRepresentative String?
+  decisionMaker            String
+
+  nextOfKinName         String
+  nextOfKinRelationship String
+  nextOfKinPhone        String
+  nextOfKinEmail        String
+  nextOfKinAddress      String
+
+  insuranceProvider               String
+  insurancePlanName               String
+  insurancePlanType               String
+  insuranceMemberId               String
+  insuranceGroupNumber            String
+  insuranceSubscriberName         String
+  insuranceSubscriberRelationship String
+  insuranceEffectiveDate          DateTime @db.Date
+  insurancePhone                  String
+
+  facilityId String
+  facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Restrict)
+
+  createdByUserId String?
+  createdBy       User?   @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  status UserStatus @default(ACTIVE)
+
+  knownAllergies               String
+  medicalHistory               String
+  height                       String
+  weight                       String
+  physicalOrSensoryLimitations String
+  cognitiveOrBehavioralStatus  String
+  nursingTreatmentRequirements String
+  specialPrecautions           String
+  elopementRisk                YesNoAnswer
+
+  ambulation   AdlLevel
+  bathing      AdlLevel
+  dressing     AdlLevel
+  eating       AdlLevel
+  selfCare     AdlLevel
+  toileting    AdlLevel
+  transferring AdlLevel
+
+  specialDiet      SpecialDiet
+  specialDietOther String?
+
+  communicableDisease  YesNoAnswer
+  bedridden            YesNoAnswer
+  pressureSores        YesNoAnswer
+  dangerToSelfOrOthers YesNoAnswer
+  require24HourCare    YesNoAnswer
+  needsMetInAlf        YesNoAnswer
+
+  currentMedications       String
+  needsHelpWithMedications YesNoAnswer
+  medicationAssistance     MedicationAssistance?
+  additionalComments       String?
+
+  examinerName          String
+  examinerLicenseNumber String
+  examinerTitle         ExaminerTitle
+  examinerPhone         String
+  examinerAddress       String
+  examinationDate       DateTime @db.Date
+
+  nurseNotes String @default("")
+  medications PatientMedication[]
+  visits      Visit[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([facilityId])
+  @@index([createdByUserId])
+  @@index([email])
+  @@map("patients")
+}
+
+model PatientMedication {
+  id        String @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  createdByUserId String?
+  createdBy       User?   @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  name         String
+  dosage       String
+  frequency    String
+  instructions String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([createdByUserId])
+  @@map("patient_medications")
+}
+
+model Visit {
+  id     String      @id @default(uuid())
+  reason String
+  status VisitStatus @default(IN_QUEUE)
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  providerId String
+  provider   User   @relation("VisitProvider", fields: [providerId], references: [id], onDelete: Restrict)
+
+  bookedByUserId String
+  bookedBy       User   @relation("VisitBookedBy", fields: [bookedByUserId], references: [id], onDelete: Restrict)
+
+  scheduledAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([providerId])
+  @@index([bookedByUserId])
+  @@index([status])
+  @@map("visits")
+}
