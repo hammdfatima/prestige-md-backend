@@ -4,7 +4,11 @@ import { hashedPass, comparePassword } from "~/lib/bycrpt";
 import prisma from "~/lib/db";
 import { HttpError } from "~/middlewares/error-handler";
 import { normalizeTeamPermissions } from "~/lib/permissions";
-import { emitProviderAvailability } from "~/lib/socket";
+import {
+  cancelDoctorOfflineGrace,
+  clearDoctorAvailabilityNow,
+  emitProviderAvailability,
+} from "~/lib/socket";
 import type {
   ChangePasswordBody,
   UpdateAvailabilityBody,
@@ -232,9 +236,17 @@ export async function updateAvailability(
     throw new HttpError("This account is inactive", HttpStatus.FORBIDDEN);
   }
 
+  if (input.isAvailable) {
+    cancelDoctorOfflineGrace(user.id);
+  } else {
+    await clearDoctorAvailabilityNow(user.id);
+    const refreshed = await getUserOrThrow(auth.id);
+    return publicUser(refreshed);
+  }
+
   const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { isAvailable: input.isAvailable },
+    data: { isAvailable: true },
     include: userInclude,
   });
 

@@ -4,6 +4,7 @@ import {
   facilityInviteQuerySchema,
   forgotPasswordSchema,
   loginSchema,
+  resetPasswordSchema,
   setFacilityPasswordSchema,
   updateAvailabilitySchema,
   updateMeSchema,
@@ -16,6 +17,7 @@ import {
   getFacilityInviteHandler,
   getMeHandler,
   loginHandler,
+  resetPasswordHandler,
   setFacilityPasswordHandler,
   updateAvailabilityHandler,
   updateMeHandler,
@@ -29,6 +31,12 @@ AUTH_ROUTER.post(
   "/forgot-password",
   schemaParseMiddleWare(forgotPasswordSchema),
   forgotPasswordHandler,
+);
+
+AUTH_ROUTER.post(
+  "/reset-password",
+  schemaParseMiddleWare(resetPasswordSchema),
+  resetPasswordHandler,
 );
 
 AUTH_ROUTER.get(

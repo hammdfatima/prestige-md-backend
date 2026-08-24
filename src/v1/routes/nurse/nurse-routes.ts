@@ -17,6 +17,7 @@ import {
   blockNurseHandler,
   createNurseHandler,
   listNursesHandler,
+  resendNurseInviteHandler,
   unblockNurseHandler,
 } from "~/v1/routes/nurse/nurse-handlers";
 
@@ -47,6 +48,12 @@ NURSE_ROUTER.patch(
   "/:id/unblock",
   schemaParseMiddleWare(nurseIdParamsSchema, "params"),
   unblockNurseHandler,
+);
+
+NURSE_ROUTER.post(
+  "/:id/resend-invite",
+  schemaParseMiddleWare(nurseIdParamsSchema, "params"),
+  resendNurseInviteHandler,
 );
 
 export default NURSE_ROUTER;

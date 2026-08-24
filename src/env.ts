@@ -21,9 +21,17 @@ const EnvSchema = z.object({
   APP_URL: z.url().optional(),
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
+  /** Optional public HTTPS logo URL. When unset, emails embed the logo inline. */
+  EMAIL_LOGO_URL: z.url().optional(),
+  /** Public API base URL used by the keep-alive pinger (e.g. https://api.onrender.com). */
+  KEEP_ALIVE_URL: z.url().optional(),
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
+  AGORA_APP_ID: z.string().optional(),
+  AGORA_APP_CERTIFICATE: z.string().optional(),
+  /** Legacy alias for AGORA_APP_CERTIFICATE */
+  AGORA_APP_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

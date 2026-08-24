@@ -26,6 +26,16 @@ enum VisitStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+  MISSED
+}
+
+enum NotificationType {
+  VISIT_BOOKED
+  VISIT_REMINDER
+  VISIT_CANCELLED
+  VISIT_COMPLETED
+  VISIT_MISSED
+  MESSAGE
 }
 
 model User {
@@ -63,6 +73,7 @@ model User {
   medicationsCreated PatientMedication[]
   visitsAsProvider Visit[] @relation("VisitProvider")
   visitsBooked     Visit[] @relation("VisitBookedBy")
+  visitMessages    VisitMessage[] @relation("VisitMessageSender")
 
   @@index([facilityId])
   @@index([employeeId])
@@ -89,6 +100,7 @@ model Facility {
   staff User[]
   staffLinks UserFacility[]
   patients Patient[]
+  emailOtps EmailOtp[]
 
   @@map("facilities")
 }
@@ -106,14 +118,17 @@ model UserFacility {
 
 model EmailOtp {
   id         String    @id @default(uuid())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facilityId String?
+  facility   Facility? @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   code       String
   expiresAt  DateTime
   consumedAt DateTime?
   createdAt  DateTime  @default(now())
 
   @@index([userId, expiresAt])
+  @@index([facilityId, expiresAt])
   @@map("email_otps")
 }
 
@@ -268,6 +283,12 @@ model Visit {
   reason String
   status VisitStatus @default(IN_QUEUE)
 
+  progressNotes  String @default("")
+  soapSubjective String @default("")
+  soapObjective  String @default("")
+  soapAssessment String @default("")
+  soapPlan       String @default("")
+
   patientId String
   patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
@@ -278,12 +299,57 @@ model Visit {
   bookedBy       User   @relation("VisitBookedBy", fields: [bookedByUserId], references: [id], onDelete: Restrict)
 
   scheduledAt DateTime @default(now())
+  reminderSentAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  messages VisitMessage[]
 
   @@index([patientId])
   @@index([providerId])
   @@index([bookedByUserId])
   @@index([status])
+  @@index([scheduledAt, reminderSentAt])
   @@map("visits")
+}
+
+model VisitMessage {
+  id      String @id @default(uuid())
+  visitId String
+  visit   Visit  @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation("VisitMessageSender", fields: [senderId], references: [id], onDelete: Restrict)
+
+  body String @default("")
+
+  attachmentUrl      String?
+  attachmentPublicId String?
+  attachmentMimeType String?
+  attachmentFilename String?
+  attachmentBytes    Int?
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([visitId, createdAt])
+  @@index([senderId])
+  @@map("visit_messages")
+}
+
+model Notification {
+  id String @id @default(uuid())
+  /// User.id or Facility.id (facility managers authenticate as the facility)
+  recipientId String
+  type        NotificationType
+  title       String
+  body        String
+  href        String
+  visitId     String?
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
+  @@map("notifications")
 }

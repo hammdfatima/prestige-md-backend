@@ -13,6 +13,7 @@ import {
   createTeamMemberHandler,
   getTeamMemberHandler,
   listTeamMembersHandler,
+  resendTeamMemberInviteHandler,
   unblockTeamMemberHandler,
   updateTeamMemberHandler,
 } from "~/v1/routes/team-member/team-member-handlers";
@@ -56,6 +57,12 @@ TEAM_MEMBER_ROUTER.patch(
   "/:id/unblock",
   schemaParseMiddleWare(teamMemberIdParamsSchema, "params"),
   unblockTeamMemberHandler,
+);
+
+TEAM_MEMBER_ROUTER.post(
+  "/:id/resend-invite",
+  schemaParseMiddleWare(teamMemberIdParamsSchema, "params"),
+  resendTeamMemberInviteHandler,
 );
 
 export default TEAM_MEMBER_ROUTER;

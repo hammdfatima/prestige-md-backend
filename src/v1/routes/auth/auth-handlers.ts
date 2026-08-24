@@ -7,6 +7,7 @@ import type {
   FacilityInviteQuery,
   ForgotPasswordBody,
   LoginBody,
+  ResetPasswordBody,
   SetFacilityPasswordBody,
   UpdateAvailabilityBody,
   UpdateMeBody,
@@ -28,6 +29,15 @@ export const forgotPasswordHandler = asyncHandler<ForgotPasswordBody>(
     return res.status(HttpStatus.OK).json({
       message:
         "If an account exists for this email, a password reset code has been sent",
+    });
+  },
+);
+
+export const resetPasswordHandler = asyncHandler<ResetPasswordBody>(
+  async (req, res) => {
+    await authService.resetPassword(req.body);
+    return res.status(HttpStatus.OK).json({
+      message: "Password updated successfully. You can sign in now.",
     });
   },
 );

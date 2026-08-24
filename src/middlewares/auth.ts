@@ -5,7 +5,7 @@ import prisma from "~/lib/db";
 import { verifyToken } from "~/lib/jwt";
 import { normalizeTeamPermissions, type TeamPermissionId } from "~/lib/permissions";
 import { HttpError } from "~/middlewares/error-handler";
-import type { IAuthRequest } from "~/types";
+import type { IAuthRequest, TokenPayload } from "~/types";
 
 export function requireAuth(...roles: UserRole[]) {
   return async (req: Request, _res: Response, next: NextFunction) => {
@@ -15,7 +15,7 @@ export function requireAuth(...roles: UserRole[]) {
         throw new HttpError("Authentication required", HttpStatus.UNAUTHORIZED);
       }
 
-      let payload;
+      let payload: TokenPayload;
       try {
         payload = verifyToken(header.slice(7));
       } catch {
@@ -142,4 +142,5 @@ export const requirePatientRead = requireAuth(
   UserRole.TEAM_MEMBER,
   UserRole.NURSE,
   UserRole.FACILITY_MANAGER,
+  UserRole.DOCTOR,
 );

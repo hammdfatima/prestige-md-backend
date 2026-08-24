@@ -286,3 +286,34 @@ export async function unblockNurse(id: string) {
 
   return publicNurse(updated);
 }
+
+export async function resendNurseInvite(id: string) {
+  const nurse = await getNurseOrThrow(id);
+
+  if (nurse.status !== UserStatus.ACTIVE) {
+    throw new HttpError(
+      "Activate the nurse before resending the invite",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  if (nurse.passwordSetAt) {
+    throw new HttpError(
+      "This nurse already set a password",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  const updated = await prisma.user.update({
+    where: { id },
+    data: { invitedAt: new Date() },
+    include: nurseInclude,
+  });
+
+  const emailSent = await sendNurseInvite(updated);
+
+  return {
+    nurse: publicNurse(updated),
+    emailSent,
+  };
+}

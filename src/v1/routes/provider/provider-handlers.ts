@@ -74,3 +74,16 @@ export const unblockProviderHandler = asyncHandler<
     data,
   });
 });
+
+export const resendProviderInviteHandler = asyncHandler<
+  Record<string, never>,
+  ProviderIdParams
+>(async (req, res) => {
+  const result = await providerService.resendProviderInvite(req.params.id);
+  return res.status(HttpStatus.OK).json({
+    message: result.emailSent
+      ? "Invite link resent to the provider"
+      : "Invite could not be sent — check server logs.",
+    data: result.provider,
+  });
+});

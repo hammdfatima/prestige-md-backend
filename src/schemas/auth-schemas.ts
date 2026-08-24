@@ -1,31 +1,32 @@
-import { z } from "zod";
+import { z } from "zod"
+import { strongPasswordSchema } from "~/lib/password"
 
 export const loginSchema = z.object({
   email: z.email("Enter a valid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: z.string().min(1, "Password is required"),
   rememberMe: z.boolean().optional().default(false),
-});
+})
 
 export const forgotPasswordSchema = z.object({
   email: z.email("Enter a valid email address"),
-});
+})
 
 export const createAdminSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
   lastName: z.string().min(1, "Last name is required"),
   email: z.email("Enter a valid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: strongPasswordSchema,
   phone: z.string().optional(),
-});
+})
 
 export const facilityInviteQuerySchema = z.object({
   token: z.string().min(1, "Invite token is required"),
-});
+})
 
 export const setFacilityPasswordSchema = z.object({
   token: z.string().min(1, "Invite token is required"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-});
+  password: strongPasswordSchema,
+})
 
 export const updateMeSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -41,22 +42,32 @@ export const updateMeSchema = z.object({
   availability: z.string().optional(),
   location: z.string().optional(),
   facilityName: z.string().optional(),
-});
+})
 
 export const updateAvailabilitySchema = z.object({
   isAvailable: z.boolean(),
-});
+})
 
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Current password is required"),
-  newPassword: z.string().min(8, "Password must be at least 8 characters"),
-});
+  newPassword: strongPasswordSchema,
+})
 
-export type LoginBody = z.infer<typeof loginSchema>;
-export type ForgotPasswordBody = z.infer<typeof forgotPasswordSchema>;
-export type CreateAdminBody = z.infer<typeof createAdminSchema>;
-export type FacilityInviteQuery = z.infer<typeof facilityInviteQuerySchema>;
-export type SetFacilityPasswordBody = z.infer<typeof setFacilityPasswordSchema>;
-export type UpdateMeBody = z.infer<typeof updateMeSchema>;
-export type UpdateAvailabilityBody = z.infer<typeof updateAvailabilitySchema>;
-export type ChangePasswordBody = z.infer<typeof changePasswordSchema>;
+export const resetPasswordSchema = z.object({
+  email: z.email("Enter a valid email address"),
+  code: z
+    .string()
+    .length(4, "Enter the 4-digit code")
+    .regex(/^\d{4}$/, "Enter the 4-digit code"),
+  password: strongPasswordSchema,
+})
+
+export type LoginBody = z.infer<typeof loginSchema>
+export type ForgotPasswordBody = z.infer<typeof forgotPasswordSchema>
+export type CreateAdminBody = z.infer<typeof createAdminSchema>
+export type FacilityInviteQuery = z.infer<typeof facilityInviteQuerySchema>
+export type SetFacilityPasswordBody = z.infer<typeof setFacilityPasswordSchema>
+export type UpdateMeBody = z.infer<typeof updateMeSchema>
+export type UpdateAvailabilityBody = z.infer<typeof updateAvailabilitySchema>
+export type ChangePasswordBody = z.infer<typeof changePasswordSchema>
+export type ResetPasswordBody = z.infer<typeof resetPasswordSchema>

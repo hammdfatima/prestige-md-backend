@@ -1,5 +1,10 @@
 import jwt from "jsonwebtoken";
 import env from "~/env";
+import {
+  emailButton,
+  escapeHtml,
+  wrapHtml,
+} from "~/lib/emails/layout";
 
 const FACILITY_INVITE_TYPE = "facility_invite";
 const STAFF_INVITE_TYPE = "staff_invite";
@@ -109,12 +114,15 @@ export function buildFacilityInviteEmail(input: {
     "If you were not expecting this invite, you can ignore this email.",
   ].join("\n");
 
-  const html = `
-    <p>Hi ${input.managerName},</p>
-    <p>You've been invited to manage <strong>${input.facilityName}</strong> on PrestigeMD.</p>
-    <p><a href="${input.inviteUrl}">Set your password</a> — this link expires in 7 days.</p>
-    <p>If you were not expecting this invite, you can ignore this email.</p>
-  `;
+  const html = wrapHtml(
+    "You're invited",
+    `
+    <p style="margin:0 0 12px">Hi ${escapeHtml(input.managerName)},</p>
+    <p style="margin:0">You've been invited to manage <strong>${escapeHtml(input.facilityName)}</strong> on PrestigeMD.</p>
+    ${emailButton(input.inviteUrl, "Set your password")}
+    <p style="margin:16px 0 0;color:#64748b;font-size:13px">This link expires in <strong>7 days</strong>. If you were not expecting this invite, you can ignore this email.</p>
+  `,
+  );
 
   return {
     to: input.email,
@@ -142,12 +150,15 @@ export function buildStaffInviteEmail(input: {
     "If you were not expecting this invite, you can ignore this email.",
   ].join("\n");
 
-  const html = `
-    <p>Hi ${input.name},</p>
-    <p>You've been invited as a <strong>${input.roleLabel}</strong> at <strong>${input.facilityName}</strong> on PrestigeMD.</p>
-    <p><a href="${input.inviteUrl}">Set your password</a> — this link expires in 7 days.</p>
-    <p>If you were not expecting this invite, you can ignore this email.</p>
-  `;
+  const html = wrapHtml(
+    "You're invited",
+    `
+    <p style="margin:0 0 12px">Hi ${escapeHtml(input.name)},</p>
+    <p style="margin:0">You've been invited as a <strong>${escapeHtml(input.roleLabel)}</strong> at <strong>${escapeHtml(input.facilityName)}</strong> on PrestigeMD.</p>
+    ${emailButton(input.inviteUrl, "Set your password")}
+    <p style="margin:16px 0 0;color:#64748b;font-size:13px">This link expires in <strong>7 days</strong>. If you were not expecting this invite, you can ignore this email.</p>
+  `,
+  );
 
   return {
     to: input.email,

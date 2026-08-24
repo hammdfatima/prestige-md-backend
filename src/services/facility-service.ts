@@ -132,3 +132,33 @@ export async function unblockFacility(id: string) {
 
   return publicFacility(updated);
 }
+
+export async function resendFacilityInvite(id: string) {
+  const facility = await getFacilityOrThrow(id);
+
+  if (facility.status !== UserStatus.ACTIVE) {
+    throw new HttpError(
+      "Activate the facility before resending the invite",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  if (facility.passwordSetAt) {
+    throw new HttpError(
+      "This facility manager already set a password",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  const updated = await prisma.facility.update({
+    where: { id },
+    data: { invitedAt: new Date() },
+  });
+
+  const emailSent = await sendFacilityInvite(updated);
+
+  return {
+    facility: publicFacility(updated),
+    emailSent,
+  };
+}

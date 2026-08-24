@@ -1,0 +1,48 @@
+# PrestigeMD Backend — Render Blueprint
+# https://render.com/docs/blueprint-spec
+#
+# Connect this repo in Render, or apply the Blueprint.
+# After creating the service, copy the Deploy Hook URL into GitHub secret RENDER_DEPLOY_HOOK.
+
+services:
+  - type: web
+    name: prestige-md-backend
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: false
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
+    startCommand: pnpm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT_NO
+        value: "8080"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: APP_URL
+        sync: false
+      - key: KEEP_ALIVE_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_LOGO_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: AGORA_APP_ID
+        sync: false
+      - key: AGORA_APP_CERTIFICATE
+        sync: false
+      - key: REDIS_URL
+        sync: false

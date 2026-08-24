@@ -3,6 +3,7 @@ import { status as HttpStatus } from "http-status";
 import { UserRole, UserStatus } from "~/generated/prisma/client";
 import { hashedPass, comparePassword } from "~/lib/bycrpt";
 import prisma from "~/lib/db";
+import { buildPasswordResetOtpEmail } from "~/lib/emails/templates";
 import {
   readInviteType,
   verifyFacilityInviteToken,
@@ -10,6 +11,7 @@ import {
 } from "~/lib/facility-invite";
 import { createToken } from "~/lib/jwt";
 import logger from "~/lib/logger";
+import { sendEmail } from "~/lib/mailer";
 import { normalizeTeamPermissions } from "~/lib/permissions";
 import { HttpError } from "~/middlewares/error-handler";
 import { publicFacilityAccount } from "~/services/me-service";
@@ -17,6 +19,7 @@ import type {
   CreateAdminBody,
   ForgotPasswordBody,
   LoginBody,
+  ResetPasswordBody,
   SetFacilityPasswordBody,
 } from "~/schemas/auth-schemas";
 
@@ -47,7 +50,7 @@ function inviteError() {
 }
 
 async function getFacilityFromInvite(token: string) {
-  let invite;
+  let invite: { facilityId: string; email: string };
   try {
     invite = verifyFacilityInviteToken(token);
   } catch {
@@ -70,7 +73,7 @@ async function getFacilityFromInvite(token: string) {
 }
 
 export async function login(input: LoginBody) {
-  const { email, password, rememberMe } = input;
+  const { email, password } = input;
   const normalizedEmail = email.toLowerCase();
 
   const user = await prisma.user.findUnique({
@@ -91,7 +94,7 @@ export async function login(input: LoginBody) {
 
     const token = createToken(
       { id: user.id, role: user.role },
-      rememberMe ? "7d" : "1d",
+      "24h",
     );
 
     return {
@@ -117,7 +120,7 @@ export async function login(input: LoginBody) {
 
   const token = createToken(
     { id: facility.id, role: UserRole.FACILITY_MANAGER },
-    rememberMe ? "7d" : "1d",
+    "24h",
   );
 
   return {
@@ -127,7 +130,7 @@ export async function login(input: LoginBody) {
 }
 
 async function getStaffFromInvite(token: string) {
-  let invite;
+  let invite: { userId: string; email: string };
   try {
     invite = verifyStaffInviteToken(token);
   } catch {
@@ -194,7 +197,7 @@ export async function setFacilityPassword(input: SetFacilityPasswordBody) {
     });
 
     return {
-      token: createToken({ id: updated.id, role: updated.role }, "1d"),
+      token: createToken({ id: updated.id, role: updated.role }, "24h"),
       user: publicUser(updated),
     };
   }
@@ -211,7 +214,7 @@ export async function setFacilityPassword(input: SetFacilityPasswordBody) {
 
   const sessionToken = createToken(
     { id: updated.id, role: UserRole.FACILITY_MANAGER },
-    "1d",
+    "24h",
   );
 
   return {
@@ -224,7 +227,7 @@ export async function forgotPassword(input: ForgotPasswordBody) {
   const email = input.email.toLowerCase();
   const user = await prisma.user.findUnique({ where: { email } });
 
-  if (user && user.status === UserStatus.ACTIVE) {
+  if (user && user.status === UserStatus.ACTIVE && user.passwordHash) {
     await prisma.emailOtp.updateMany({
       where: { userId: user.id, consumedAt: null },
       data: { consumedAt: new Date() },
@@ -239,10 +242,123 @@ export async function forgotPassword(input: ForgotPasswordBody) {
       },
     });
 
-    if (process.env.NODE_ENV !== "production") {
+    const name = `${user.firstName} ${user.lastName}`.trim() || "there";
+    const emailSent = await sendEmail(
+      buildPasswordResetOtpEmail({
+        name,
+        email: user.email,
+        code,
+      }),
+    );
+
+    if (!emailSent && process.env.NODE_ENV !== "production") {
       logger.info(`Password reset OTP for ${email}: ${code}`);
     }
+    return;
   }
+
+  const facility = await prisma.facility.findUnique({ where: { email } });
+  if (
+    facility &&
+    facility.status === UserStatus.ACTIVE &&
+    facility.passwordHash
+  ) {
+    await prisma.emailOtp.updateMany({
+      where: { facilityId: facility.id, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+
+    const code = generateOtp();
+    await prisma.emailOtp.create({
+      data: {
+        facilityId: facility.id,
+        code,
+        expiresAt: new Date(Date.now() + OTP_TTL_MS),
+      },
+    });
+
+    const emailSent = await sendEmail(
+      buildPasswordResetOtpEmail({
+        name: facility.managerName || "there",
+        email: facility.email,
+        code,
+      }),
+    );
+
+    if (!emailSent && process.env.NODE_ENV !== "production") {
+      logger.info(`Password reset OTP for facility ${email}: ${code}`);
+    }
+  }
+}
+
+export async function resetPassword(input: ResetPasswordBody) {
+  const email = input.email.toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (user && user.status === UserStatus.ACTIVE && user.passwordHash) {
+    const otp = await prisma.emailOtp.findFirst({
+      where: {
+        userId: user.id,
+        code: input.code,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!otp) {
+      throw new HttpError(
+        "Invalid or expired reset code",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    await prisma.$transaction([
+      prisma.emailOtp.update({
+        where: { id: otp.id },
+        data: { consumedAt: new Date() },
+      }),
+      prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: hashedPass(input.password) },
+      }),
+    ]);
+    return;
+  }
+
+  const facility = await prisma.facility.findUnique({ where: { email } });
+  if (
+    !facility ||
+    facility.status !== UserStatus.ACTIVE ||
+    !facility.passwordHash
+  ) {
+    throw new HttpError("Invalid or expired reset code", HttpStatus.BAD_REQUEST);
+  }
+
+  const otp = await prisma.emailOtp.findFirst({
+    where: {
+      facilityId: facility.id,
+      code: input.code,
+      consumedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (!otp) {
+    throw new HttpError("Invalid or expired reset code", HttpStatus.BAD_REQUEST);
+  }
+
+  await prisma.$transaction([
+    prisma.emailOtp.update({
+      where: { id: otp.id },
+      data: { consumedAt: new Date() },
+    }),
+    prisma.facility.update({
+      where: { id: facility.id },
+      data: { passwordHash: hashedPass(input.password) },
+    }),
+  ]);
 }
 
 export async function createAdmin(input: CreateAdminBody) {

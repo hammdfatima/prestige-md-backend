@@ -52,3 +52,16 @@ export const unblockFacilityHandler = asyncHandler<
     data,
   });
 });
+
+export const resendFacilityInviteHandler = asyncHandler<
+  Record<string, never>,
+  FacilityIdParams
+>(async (req, res) => {
+  const result = await facilityService.resendFacilityInvite(req.params.id);
+  return res.status(HttpStatus.OK).json({
+    message: result.emailSent
+      ? "Invite link resent to the facility manager"
+      : "Invite could not be sent — check server logs.",
+    data: result.facility,
+  });
+});

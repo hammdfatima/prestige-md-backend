@@ -63,3 +63,16 @@ export const unblockNurseHandler = asyncHandler<
     data,
   });
 });
+
+export const resendNurseInviteHandler = asyncHandler<
+  Record<string, never>,
+  NurseIdParams
+>(async (req, res) => {
+  const result = await nurseService.resendNurseInvite(req.params.id);
+  return res.status(HttpStatus.OK).json({
+    message: result.emailSent
+      ? "Invite link resent to the nurse"
+      : "Invite could not be sent — check server logs.",
+    data: result.nurse,
+  });
+});

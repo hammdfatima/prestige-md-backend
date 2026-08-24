@@ -337,7 +337,8 @@ function assertCanReadPatients(auth: TokenPayload) {
   if (
     auth.role === UserRole.ADMIN ||
     auth.role === UserRole.NURSE ||
-    auth.role === UserRole.FACILITY_MANAGER
+    auth.role === UserRole.FACILITY_MANAGER ||
+    auth.role === UserRole.DOCTOR
   ) {
     return;
   }
@@ -367,6 +368,39 @@ export async function listPatientsForViewer(
 ) {
   assertCanReadPatients(auth);
 
+  if (auth.role === UserRole.DOCTOR) {
+    const visits = await prisma.visit.findMany({
+      where: { providerId: auth.id },
+      select: { patientId: true },
+      distinct: ["patientId"],
+    });
+    const patientIds = visits.map((visit) => visit.patientId);
+    if (patientIds.length === 0) {
+      return [];
+    }
+
+    const patients = await prisma.patient.findMany({
+      where: {
+        id: { in: patientIds },
+        ...(query.search
+          ? {
+              OR: [
+                { firstName: { contains: query.search, mode: "insensitive" } },
+                { lastName: { contains: query.search, mode: "insensitive" } },
+                { memberId: { contains: query.search, mode: "insensitive" } },
+                { email: { contains: query.search, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+        ...(query.status ? { status: query.status } : {}),
+      },
+      include: patientInclude,
+      orderBy: { updatedAt: "desc" },
+    });
+
+    return patients.map((patient) => publicPatient(patient));
+  }
+
   if (isFacilityScopedReader(auth)) {
     if (!auth.facilityId) {
       return [];
@@ -379,6 +413,18 @@ export async function listPatientsForViewer(
 
 export async function getPatientForViewer(auth: TokenPayload, id: string) {
   assertCanReadPatients(auth);
+
+  if (auth.role === UserRole.DOCTOR) {
+    const visit = await prisma.visit.findFirst({
+      where: { patientId: id, providerId: auth.id },
+      select: { id: true },
+    });
+    if (!visit) {
+      throw new HttpError("Patient not found", HttpStatus.NOT_FOUND);
+    }
+    return getPatient(id);
+  }
+
   const patient = await getPatient(id);
 
   if (

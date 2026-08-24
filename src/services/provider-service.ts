@@ -118,7 +118,7 @@ export async function createProvider(input: CreateProviderBody) {
     );
   }
 
-  let avatarUrl = input.avatarUrl?.trim() || null;
+  const avatarUrl = input.avatarUrl?.trim() || null;
   const avatarPublicId = input.avatarPublicId?.trim() || null;
 
   if (avatarUrl && !/^https?:\/\//i.test(avatarUrl)) {
@@ -293,6 +293,37 @@ export async function unblockProvider(id: string) {
   });
 
   return publicProvider(updated);
+}
+
+export async function resendProviderInvite(id: string) {
+  const provider = await getProviderOrThrow(id);
+
+  if (provider.status !== UserStatus.ACTIVE) {
+    throw new HttpError(
+      "Activate the provider before resending the invite",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  if (provider.passwordSetAt) {
+    throw new HttpError(
+      "This provider already set a password",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  const updated = await prisma.user.update({
+    where: { id },
+    data: { invitedAt: new Date() },
+    include: providerInclude,
+  });
+
+  const emailSent = await sendProviderInvite(updated);
+
+  return {
+    provider: publicProvider(updated),
+    emailSent,
+  };
 }
 
 export async function listAvailableProviders() {

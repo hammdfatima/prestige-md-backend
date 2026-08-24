@@ -15,6 +15,7 @@ import {
   createProviderHandler,
   listAvailableProvidersHandler,
   listProvidersHandler,
+  resendProviderInviteHandler,
   unblockProviderHandler,
 } from "~/v1/routes/provider/provider-handlers";
 
@@ -52,6 +53,12 @@ PROVIDER_ROUTER.patch(
   "/:id/unblock",
   schemaParseMiddleWare(providerIdParamsSchema, "params"),
   unblockProviderHandler,
+);
+
+PROVIDER_ROUTER.post(
+  "/:id/resend-invite",
+  schemaParseMiddleWare(providerIdParamsSchema, "params"),
+  resendProviderInviteHandler,
 );
 
 export default PROVIDER_ROUTER;

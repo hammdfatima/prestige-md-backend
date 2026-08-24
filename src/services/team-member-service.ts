@@ -202,3 +202,33 @@ export async function unblockTeamMember(id: string) {
 
   return publicTeamMember(updated);
 }
+
+export async function resendTeamMemberInvite(id: string) {
+  const member = await getTeamMemberOrThrow(id);
+
+  if (member.status !== UserStatus.ACTIVE) {
+    throw new HttpError(
+      "Activate the team member before resending the invite",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  if (member.passwordSetAt) {
+    throw new HttpError(
+      "This team member already set a password",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  const updated = await prisma.user.update({
+    where: { id },
+    data: { invitedAt: new Date() },
+  });
+
+  const emailSent = await sendTeamMemberInvite(updated);
+
+  return {
+    member: publicTeamMember(updated),
+    emailSent,
+  };
+}

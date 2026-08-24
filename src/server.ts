@@ -11,10 +11,28 @@ import { initSocket } from "~/lib/socket";
 import prisma from "./lib/db";
 import { configureCloudinary } from "./lib/cloudinary";
 import { limiter } from "./middlewares/rate-limiter";
+import { startKeepAliveJob } from "./jobs/keep-alive-job";
+import { startVisitReminderJob } from "./jobs/visit-reminder-job";
 
 const app = express();
 
 const server = createServer(app);
+
+app.get("/health", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
+    service: "prestige-md-backend",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
+    service: "prestige-md-backend",
+    timestamp: new Date().toISOString(),
+  });
+});
 
 app.use(
   cors({
@@ -46,11 +64,17 @@ app.use("/api", MAIN_ROUTER);
 // Error handler middleware
 app.use(errorHandle);
 
+/* eslint-disable node/no-process-env */
+const port = Number(process.env.PORT) || env.PORT_NO;
+/* eslint-enable node/no-process-env */
+
 // Start the server
-server.listen(env.PORT_NO, () => {
-  logger.info(`Server started on port :${env.PORT_NO}`);
+server.listen(port, () => {
+  logger.info(`Server started on port :${port}`);
   initSocket(server);
   configureCloudinary();
+  startVisitReminderJob();
+  startKeepAliveJob();
   prisma.$connect().then(() => {
     logger.info("Connected to the database successfully!");
   });

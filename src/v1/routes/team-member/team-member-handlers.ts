@@ -75,3 +75,16 @@ export const unblockTeamMemberHandler = asyncHandler<
     data,
   });
 });
+
+export const resendTeamMemberInviteHandler = asyncHandler<
+  Record<string, never>,
+  TeamMemberIdParams
+>(async (req, res) => {
+  const result = await teamMemberService.resendTeamMemberInvite(req.params.id);
+  return res.status(HttpStatus.OK).json({
+    message: result.emailSent
+      ? "Invite link resent to the team member"
+      : "Invite could not be sent — check server logs.",
+    data: result.member,
+  });
+});

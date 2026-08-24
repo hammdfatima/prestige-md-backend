@@ -5,7 +5,7 @@ import type { TokenPayload } from "~/types";
 
 const createToken = (
   payload: TokenPayload,
-  expiresIn: SignOptions["expiresIn"] = "1d",
+  expiresIn: SignOptions["expiresIn"] = "24h",
 ): string => {
   return jwt.sign(payload, env.JWT_SECRET, { expiresIn });
 };
