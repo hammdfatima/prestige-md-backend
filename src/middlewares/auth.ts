@@ -1,87 +1,62 @@
 import type { NextFunction, Request, Response } from "express";
-import { status as HttpStatus } from "http-status";
-import { UserRole, UserStatus } from "~/generated/prisma/client";
-import prisma from "~/lib/db";
+import { UserRole } from "~/generated/prisma/client";
 import { verifyToken } from "~/lib/jwt";
-import { normalizeTeamPermissions, type TeamPermissionId } from "~/lib/permissions";
+import { validateSessionToken } from "~/lib/validate-session-token";
+import {
+  hasTeamPermission,
+  normalizeTeamPermissions,
+  type TeamPermissionId,
+} from "~/lib/permissions";
 import { HttpError } from "~/middlewares/error-handler";
+import { status as HttpStatus } from "http-status";
 import type { IAuthRequest, TokenPayload } from "~/types";
 
-export function requireAuth(...roles: UserRole[]) {
+type AuthMiddlewareOptions = {
+  roles?: UserRole[];
+  skipIdleCheck?: boolean;
+};
+
+async function authenticateRequest(
+  req: Request,
+  options: AuthMiddlewareOptions,
+): Promise<void> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) {
+    throw new HttpError("Authentication required", HttpStatus.UNAUTHORIZED);
+  }
+
+  let payload: TokenPayload & { iat?: number };
+  try {
+    payload = verifyToken(header.slice(7)) as TokenPayload & { iat?: number };
+  } catch {
+    throw new HttpError("Invalid or expired token", HttpStatus.UNAUTHORIZED);
+  }
+
+  const user = await validateSessionToken(payload, {
+    skipIdleCheck: options.skipIdleCheck,
+    allowedRoles: options.roles,
+  });
+
+  (req as IAuthRequest).user = user;
+}
+
+function createAuthMiddleware(options: AuthMiddlewareOptions = {}) {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
-      const header = req.headers.authorization;
-      if (!header?.startsWith("Bearer ")) {
-        throw new HttpError("Authentication required", HttpStatus.UNAUTHORIZED);
-      }
-
-      let payload: TokenPayload;
-      try {
-        payload = verifyToken(header.slice(7));
-      } catch {
-        throw new HttpError("Invalid or expired token", HttpStatus.UNAUTHORIZED);
-      }
-
-      const user = await prisma.user.findUnique({
-        where: { id: payload.id },
-        select: {
-          id: true,
-          role: true,
-          status: true,
-          permissions: true,
-          facilityId: true,
-          facilityLinks: { select: { facilityId: true }, take: 1 },
-        },
-      });
-
-      if (user) {
-        if (user.status !== UserStatus.ACTIVE) {
-          throw new HttpError("Authentication required", HttpStatus.UNAUTHORIZED);
-        }
-
-        if (roles.length > 0 && !roles.includes(user.role)) {
-          throw new HttpError(
-            "You do not have access to this resource",
-            HttpStatus.FORBIDDEN,
-          );
-        }
-
-        (req as IAuthRequest).user = {
-          id: user.id,
-          role: user.role,
-          permissions: normalizeTeamPermissions(user.permissions),
-          facilityId: user.facilityId ?? user.facilityLinks[0]?.facilityId ?? null,
-        };
-        next();
-        return;
-      }
-
-      const facility = await prisma.facility.findUnique({
-        where: { id: payload.id },
-        select: { id: true, status: true },
-      });
-
-      if (!facility || facility.status !== UserStatus.ACTIVE) {
-        throw new HttpError("Authentication required", HttpStatus.UNAUTHORIZED);
-      }
-
-      if (roles.length > 0 && !roles.includes(UserRole.FACILITY_MANAGER)) {
-        throw new HttpError(
-          "You do not have access to this resource",
-          HttpStatus.FORBIDDEN,
-        );
-      }
-
-      (req as IAuthRequest).user = {
-        id: facility.id,
-        role: UserRole.FACILITY_MANAGER,
-        facilityId: facility.id,
-      };
+      await authenticateRequest(req, options);
       next();
     } catch (error) {
       next(error);
     }
   };
+}
+
+export function requireAuth(...roles: UserRole[]) {
+  return createAuthMiddleware({ roles });
+}
+
+export function requireAuthAllowIdle(...roles: UserRole[]) {
+  return createAuthMiddleware({ roles, skipIdleCheck: true });
 }
 
 export function getAuthUser(req: Request) {
@@ -97,22 +72,31 @@ export function requirePermission(...anyOf: TeamPermissionId[]) {
     try {
       const user = getAuthUser(req);
 
-      if (user.role === UserRole.ADMIN) {
-        next();
-        return;
-      }
-
-      if (user.role !== UserRole.TEAM_MEMBER) {
+      if (!hasTeamPermission(user, ...anyOf)) {
         throw new HttpError(
           "You do not have access to this resource",
           HttpStatus.FORBIDDEN,
         );
       }
 
-      const granted = new Set(user.permissions ?? []);
-      const allowed = anyOf.some((permission) => granted.has(permission));
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
 
-      if (!allowed) {
+export function requirePermissionForTeamMember(...anyOf: TeamPermissionId[]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    try {
+      const user = getAuthUser(req);
+
+      if (user.role !== UserRole.TEAM_MEMBER) {
+        next();
+        return;
+      }
+
+      if (!hasTeamPermission(user, ...anyOf)) {
         throw new HttpError(
           "You do not have access to this resource",
           HttpStatus.FORBIDDEN,
@@ -144,3 +128,5 @@ export const requirePatientRead = requireAuth(
   UserRole.FACILITY_MANAGER,
   UserRole.DOCTOR,
 );
+
+export { normalizeTeamPermissions };

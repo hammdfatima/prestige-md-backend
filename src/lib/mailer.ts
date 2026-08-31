@@ -12,17 +12,9 @@ export type OutboundEmail = {
   html: string
 }
 
-function logEmailForTesting(email: OutboundEmail, reason: string) {
-  logger.warn(`Email not sent (${reason}). Logging content for testing:`)
-  logger.info(
-    [
-      `To: ${email.to}`,
-      `Subject: ${email.subject}`,
-      "----- TEXT -----",
-      email.text,
-      "----- HTML -----",
-      email.html,
-    ].join("\n"),
+function logEmailMetadata(email: OutboundEmail, reason: string) {
+  logger.warn(
+    `Email not sent (${reason}). To=${email.to} Subject="${email.subject}"`,
   )
 }
 
@@ -58,7 +50,7 @@ function emailLogoAttachment() {
 
 export async function sendEmail(email: OutboundEmail): Promise<boolean> {
   if (!env.RESEND_API_KEY) {
-    logEmailForTesting(email, "RESEND_API_KEY is not configured")
+    logEmailMetadata(email, "RESEND_API_KEY is not configured")
     return false
   }
 
@@ -80,7 +72,7 @@ export async function sendEmail(email: OutboundEmail): Promise<boolean> {
 
     if (error) {
       logger.error(error)
-      logEmailForTesting(email, error.message ?? "Resend send failed")
+      logEmailMetadata(email, error.message ?? "Resend send failed")
       return false
     }
 
@@ -88,7 +80,7 @@ export async function sendEmail(email: OutboundEmail): Promise<boolean> {
     return true
   } catch (error) {
     logger.error(error)
-    logEmailForTesting(email, "Resend send failed")
+    logEmailMetadata(email, "Resend send failed")
     return false
   }
 }

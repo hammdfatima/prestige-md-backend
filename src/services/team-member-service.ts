@@ -1,20 +1,36 @@
 import { randomBytes } from "node:crypto";
 import { status as HttpStatus } from "http-status";
 import { UserRole, UserStatus, type User } from "~/generated/prisma/client";
-import env from "~/env";
+import { getAppBaseUrl } from "~/lib/app-url";
 import prisma from "~/lib/db";
+import {
+  facilityEmailWhere,
+  employeeIdWhere,
+  userEmailWhere,
+} from "~/lib/encryption-queries";
+import { recordMatchesSearch } from "~/lib/encrypted-search";
 import {
   buildStaffInviteEmail,
   createStaffInviteToken,
 } from "~/lib/facility-invite";
 import { sendEmail } from "~/lib/mailer";
 import { normalizeTeamPermissions } from "~/lib/permissions";
+import {
+  formatAuditTargetResource,
+  recordSecurityAuditEvent,
+  SECURITY_AUDIT_EVENTS,
+  type AuditRequestContext,
+} from "~/lib/security-audit";
 import { HttpError } from "~/middlewares/error-handler";
+import { invalidateUserCredentials } from "~/services/session-revocation-service";
 import type {
   CreateTeamMemberBody,
   ListTeamMembersQuery,
+  PromoteTeamMemberBody,
   UpdateTeamMemberBody,
 } from "~/schemas/team-member-schemas";
+import { assertStepUpToken } from "~/services/step-up-auth-service";
+import type { TokenPayload } from "~/types";
 
 function splitName(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -36,7 +52,9 @@ function publicTeamMember(user: User) {
 async function uniqueEmployeeId() {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const employeeId = `TM-${randomBytes(3).toString("hex").toUpperCase()}`;
-    const existing = await prisma.user.findFirst({ where: { employeeId } });
+    const existing = await prisma.user.findFirst({
+      where: employeeIdWhere(employeeId),
+    });
     if (!existing) {
       return employeeId;
     }
@@ -52,7 +70,7 @@ async function sendTeamMemberInvite(user: User) {
     userId: user.id,
     email: user.email,
   });
-  const appUrl = (env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  const appUrl = getAppBaseUrl();
   const inviteUrl = `${appUrl}/auth/set-password?token=${encodeURIComponent(token)}`;
 
   return sendEmail(
@@ -68,8 +86,8 @@ async function sendTeamMemberInvite(user: User) {
 
 async function assertEmailAvailable(email: string, excludeUserId?: string) {
   const [emailUser, emailFacility] = await Promise.all([
-    prisma.user.findUnique({ where: { email } }),
-    prisma.facility.findUnique({ where: { email } }),
+    prisma.user.findUnique({ where: userEmailWhere(email) }),
+    prisma.facility.findUnique({ where: facilityEmailWhere(email) }),
   ]);
 
   if (emailFacility || (emailUser && emailUser.id !== excludeUserId)) {
@@ -80,7 +98,18 @@ async function assertEmailAvailable(email: string, excludeUserId?: string) {
   }
 }
 
-export async function createTeamMember(input: CreateTeamMemberBody) {
+function permissionsChanged(current: string[], next: string[]) {
+  const left = normalizeTeamPermissions(current).slice().sort().join(",");
+  const right = normalizeTeamPermissions(next).slice().sort().join(",");
+  return left !== right;
+}
+
+export async function createTeamMember(
+  actor: TokenPayload,
+  input: CreateTeamMemberBody,
+) {
+  assertStepUpToken(actor, input.stepUpToken);
+
   const email = input.email.toLowerCase();
   const { firstName, lastName } = splitName(input.name);
   const permissions = normalizeTeamPermissions(input.permissions);
@@ -116,22 +145,23 @@ export async function listTeamMembers(query: ListTeamMembersQuery) {
     where: {
       role: UserRole.TEAM_MEMBER,
       status: query.status,
-      ...(search
-        ? {
-            OR: [
-              { firstName: { contains: search, mode: "insensitive" } },
-              { lastName: { contains: search, mode: "insensitive" } },
-              { email: { contains: search, mode: "insensitive" } },
-              { employeeId: { contains: search, mode: "insensitive" } },
-              { phone: { contains: search, mode: "insensitive" } },
-            ],
-          }
-        : {}),
     },
     orderBy: { createdAt: "desc" },
   });
 
-  return members.map(publicTeamMember);
+  const filtered = search
+    ? members.filter((member) =>
+        recordMatchesSearch(member, search, [
+          "firstName",
+          "lastName",
+          "email",
+          "employeeId",
+          "phone",
+        ]),
+      )
+    : members;
+
+  return filtered.map(publicTeamMember);
 }
 
 async function getTeamMemberOrThrow(id: string) {
@@ -150,12 +180,26 @@ export async function getTeamMember(id: string) {
   return publicTeamMember(await getTeamMemberOrThrow(id));
 }
 
-export async function updateTeamMember(id: string, input: UpdateTeamMemberBody) {
-  await getTeamMemberOrThrow(id);
+export async function updateTeamMember(
+  actor: TokenPayload,
+  id: string,
+  input: UpdateTeamMemberBody,
+) {
+  const member = await getTeamMemberOrThrow(id);
+  const permissions = normalizeTeamPermissions(input.permissions);
+
+  if (permissionsChanged(member.permissions, permissions)) {
+    if (!input.stepUpToken) {
+      throw new HttpError(
+        "Step-up authentication is required to change permissions",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    assertStepUpToken(actor, input.stepUpToken);
+  }
 
   const email = input.email.toLowerCase();
   const { firstName, lastName } = splitName(input.name);
-  const permissions = normalizeTeamPermissions(input.permissions);
 
   await assertEmailAvailable(email, id);
 
@@ -173,6 +217,53 @@ export async function updateTeamMember(id: string, input: UpdateTeamMemberBody) 
   return publicTeamMember(updated);
 }
 
+export async function promoteTeamMemberToAdmin(
+  actor: TokenPayload,
+  id: string,
+  input: PromoteTeamMemberBody,
+  ctx: AuditRequestContext,
+) {
+  assertStepUpToken(actor, input.stepUpToken);
+
+  const member = await getTeamMemberOrThrow(id);
+
+  if (member.id === actor.id) {
+    throw new HttpError(
+      "You cannot change your own admin role through this action",
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: member.id },
+    data: {
+      role: UserRole.ADMIN,
+      permissions: [],
+    },
+  });
+
+  const actorUser = await prisma.user.findUnique({
+    where: { id: actor.id },
+    select: { email: true },
+  });
+
+  await recordSecurityAuditEvent({
+    eventType: SECURITY_AUDIT_EVENTS.ADMIN_PROMOTED,
+    actorId: actor.id,
+    actorRole: actor.role,
+    actorEmail: actorUser?.email ?? "unknown",
+    targetResource: formatAuditTargetResource("user", updated.id),
+    context: ctx,
+  });
+
+  return {
+    id: updated.id,
+    email: updated.email,
+    name: `${updated.firstName} ${updated.lastName}`.trim(),
+    role: updated.role,
+  };
+}
+
 export async function blockTeamMember(id: string) {
   const member = await getTeamMemberOrThrow(id);
 
@@ -184,6 +275,8 @@ export async function blockTeamMember(id: string) {
     where: { id },
     data: { status: UserStatus.INACTIVE },
   });
+
+  await invalidateUserCredentials(updated.id, updated.role);
 
   return publicTeamMember(updated);
 }

@@ -1,7 +1,17 @@
 import { status as HttpStatus } from "http-status";
 import type { Facility, User } from "~/generated/prisma/client";
-import { hashedPass, comparePassword } from "~/lib/bycrpt";
+import { getDoctorInContextConsentStatus } from "~/services/in-context-consent-service";
+import { revokeAllAccountSessions } from "~/services/account-session-service";
+import { comparePassword } from "~/lib/bycrpt";
+import { storeNewPassword } from "~/lib/store-new-password";
 import prisma from "~/lib/db";
+import {
+  facilityEmailWhere,
+  userEmailWhere,
+} from "~/lib/encryption-queries";
+import {
+  assertOptionalCallerOwnsObjectKey,
+} from "~/lib/object-key-ownership";
 import { HttpError } from "~/middlewares/error-handler";
 import { normalizeTeamPermissions } from "~/lib/permissions";
 import {
@@ -40,6 +50,20 @@ function publicUser(user: UserWithFacility) {
     name: `${user.firstName} ${user.lastName}`.trim(),
     permissions: normalizeTeamPermissions(user.permissions),
     facilityName: facility?.name ?? null,
+  };
+}
+
+async function withDoctorConsentStatus(
+  auth: TokenPayload,
+  profile: ReturnType<typeof publicUser>,
+) {
+  if (auth.role !== UserRole.DOCTOR) {
+    return profile;
+  }
+
+  return {
+    ...profile,
+    inContextConsent: await getDoctorInContextConsentStatus(auth.id),
   };
 }
 
@@ -94,8 +118,8 @@ function assertCloudinaryUrl(url: string) {
 
 async function assertEmailAvailable(email: string, except?: { userId?: string; facilityId?: string }) {
   const [emailUser, emailFacility] = await Promise.all([
-    prisma.user.findUnique({ where: { email } }),
-    prisma.facility.findUnique({ where: { email } }),
+    prisma.user.findUnique({ where: userEmailWhere(email) }),
+    prisma.facility.findUnique({ where: facilityEmailWhere(email) }),
   ]);
 
   const userTaken = Boolean(emailUser && emailUser.id !== except?.userId);
@@ -118,7 +142,7 @@ export async function getMe(auth: TokenPayload) {
   }
 
   const user = await getUserOrThrow(auth.id);
-  return publicUser(user);
+  return withDoctorConsentStatus(auth, publicUser(user));
 }
 
 async function updateFacilityMe(auth: TokenPayload, input: UpdateMeBody) {
@@ -135,6 +159,7 @@ async function updateFacilityMe(auth: TokenPayload, input: UpdateMeBody) {
   if (input.avatarUrl?.trim()) {
     const nextUrl = input.avatarUrl.trim();
     assertCloudinaryUrl(nextUrl);
+    assertOptionalCallerOwnsObjectKey(auth, input.avatarPublicId);
     avatarUrl = nextUrl;
     avatarPublicId = input.avatarPublicId?.trim() || avatarPublicId;
   }
@@ -181,6 +206,7 @@ export async function updateMe(auth: TokenPayload, input: UpdateMeBody) {
   if (input.avatarUrl?.trim()) {
     const nextUrl = input.avatarUrl.trim();
     assertCloudinaryUrl(nextUrl);
+    assertOptionalCallerOwnsObjectKey(auth, input.avatarPublicId);
     avatarUrl = nextUrl;
     avatarPublicId = input.avatarPublicId?.trim() || avatarPublicId;
   }
@@ -277,10 +303,10 @@ export async function changePassword(
     }
 
     if (
-      !comparePassword({
+      !(await comparePassword({
         password: input.currentPassword,
         hash: facility.passwordHash,
-      })
+      }))
     ) {
       throw new HttpError(
         "Current password is incorrect",
@@ -297,7 +323,14 @@ export async function changePassword(
 
     await prisma.facility.update({
       where: { id: facility.id },
-      data: { passwordHash: hashedPass(input.newPassword) },
+      data: {
+        passwordHash: await storeNewPassword(input.newPassword),
+        tokenVersion: { increment: 1 },
+      },
+    });
+    await revokeAllAccountSessions({
+      id: facility.id,
+      role: UserRole.FACILITY_MANAGER,
     });
 
     return { id: facility.id };
@@ -313,10 +346,10 @@ export async function changePassword(
   }
 
   if (
-    !comparePassword({
+    !(await comparePassword({
       password: input.currentPassword,
       hash: user.passwordHash,
-    })
+    }))
   ) {
     throw new HttpError("Current password is incorrect", HttpStatus.BAD_REQUEST);
   }
@@ -330,8 +363,12 @@ export async function changePassword(
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: hashedPass(input.newPassword) },
+    data: {
+      passwordHash: await storeNewPassword(input.newPassword),
+      tokenVersion: { increment: 1 },
+    },
   });
+  await revokeAllAccountSessions({ id: user.id, role: user.role });
 
   return { id: user.id };
 }

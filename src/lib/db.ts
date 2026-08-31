@@ -3,9 +3,10 @@ import { Pool } from "pg";
 import { PrismaClient } from "~/generated/prisma/client";
 import env from "~/env";
 import logger from "~/lib/logger";
+import { createEncryptedPrismaClient } from "~/lib/prisma-encryption-extension";
 
 const globalForDb = globalThis as typeof globalThis & {
-  prisma?: PrismaClient;
+  prisma?: ReturnType<typeof createEncryptedPrismaClient>;
   pgPool?: Pool;
 };
 
@@ -28,11 +29,11 @@ function createPool() {
 
 const pool = globalForDb.pgPool ?? createPool();
 
-const prisma =
-  globalForDb.prisma ??
-  new PrismaClient({
-    adapter: new PrismaPg(pool),
-  });
+const baseClient = new PrismaClient({
+  adapter: new PrismaPg(pool),
+});
+
+const prisma = globalForDb.prisma ?? createEncryptedPrismaClient(baseClient);
 
 if (process.env.NODE_ENV !== "production") {
   globalForDb.pgPool = pool;

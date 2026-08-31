@@ -1,7 +1,7 @@
 import { createLogger, format, transports } from "winston";
 import { blue, yellow, red, green } from "colorette";
+import { sanitizeLogMessage } from "~/lib/sanitize-for-log";
 
-// Define color functions for different log levels
 const colors = {
   info: blue,
   warn: yellow,
@@ -9,24 +9,19 @@ const colors = {
   debug: green,
 };
 
-// Create a custom format for colorizing log messages
 const colorizeFormat = format.printf(({ level, message }) => {
+  const safeMessage = sanitizeLogMessage(message);
   const colorFn = colors[level as keyof typeof colors];
   if (colorFn) {
-    return colorFn(`[${level.toUpperCase()}] ${message}`);
+    return colorFn(`[${level.toUpperCase()}] ${safeMessage}`);
   }
-  return `[${level.toUpperCase()}] ${message}`;
+  return `[${level.toUpperCase()}] ${safeMessage}`;
 });
 
-// Create a custom logger instance with colorized output
 const logger = createLogger({
-  level: "debug", // Set log level
-  format: format.combine(
-    format.timestamp(), // Add timestamp to log messages
-    colorizeFormat, // Apply color formatting
-  ),
-  transports: [new transports.Console()], // Log to console
+  level: "debug",
+  format: format.combine(format.timestamp(), colorizeFormat),
+  transports: [new transports.Console()],
 });
 
-// Export the custom logger instance
 export default logger;

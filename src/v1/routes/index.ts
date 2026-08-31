@@ -6,6 +6,7 @@ import NOTIFICATION_ROUTER from "~/v1/routes/notification/notification-routes";
 import NURSE_ROUTER from "~/v1/routes/nurse/nurse-routes";
 import PATIENT_ROUTER from "~/v1/routes/patient/patient-routes";
 import PROVIDER_ROUTER from "~/v1/routes/provider/provider-routes";
+import SECURITY_AUDIT_ROUTER from "~/v1/routes/security-audit/security-audit-routes";
 import TEAM_MEMBER_ROUTER from "~/v1/routes/team-member/team-member-routes";
 import VISIT_ROUTER from "~/v1/routes/visit/visit-routes";
 
@@ -19,5 +20,6 @@ MAIN_ROUTER.use("/team-members", TEAM_MEMBER_ROUTER);
 MAIN_ROUTER.use("/visits", VISIT_ROUTER);
 MAIN_ROUTER.use("/notifications", NOTIFICATION_ROUTER);
 MAIN_ROUTER.use("/files", FILES_ROUTER);
+MAIN_ROUTER.use("/security-audit", SECURITY_AUDIT_ROUTER);
 
 export default MAIN_ROUTER;

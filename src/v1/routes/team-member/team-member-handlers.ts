@@ -1,8 +1,11 @@
 import { status as HttpStatus } from "http-status";
 import { asyncHandler } from "~/lib/async-handler";
+import { getRequestIp, getRequestUserAgent } from "~/lib/request-ip";
+import { getAuthUser } from "~/middlewares/auth";
 import type {
   CreateTeamMemberBody,
   ListTeamMembersQuery,
+  PromoteTeamMemberBody,
   TeamMemberIdParams,
   UpdateTeamMemberBody,
 } from "~/schemas/team-member-schemas";
@@ -10,7 +13,10 @@ import * as teamMemberService from "~/services/team-member-service";
 
 export const createTeamMemberHandler = asyncHandler<CreateTeamMemberBody>(
   async (req, res) => {
-    const result = await teamMemberService.createTeamMember(req.body);
+    const result = await teamMemberService.createTeamMember(
+      getAuthUser(req),
+      req.body,
+    );
     return res.status(HttpStatus.CREATED).json({
       message: result.emailSent
         ? "Invite link sent to the team member"
@@ -47,9 +53,32 @@ export const updateTeamMemberHandler = asyncHandler<
   UpdateTeamMemberBody,
   TeamMemberIdParams
 >(async (req, res) => {
-  const data = await teamMemberService.updateTeamMember(req.params.id, req.body);
+  const data = await teamMemberService.updateTeamMember(
+    getAuthUser(req),
+    req.params.id,
+    req.body,
+  );
   return res.status(HttpStatus.OK).json({
     message: "Team member updated successfully",
+    data,
+  });
+});
+
+export const promoteTeamMemberHandler = asyncHandler<
+  PromoteTeamMemberBody,
+  TeamMemberIdParams
+>(async (req, res) => {
+  const data = await teamMemberService.promoteTeamMemberToAdmin(
+    getAuthUser(req),
+    req.params.id,
+    req.body,
+    {
+      ipAddress: getRequestIp(req),
+      userAgent: getRequestUserAgent(req),
+    },
+  );
+  return res.status(HttpStatus.OK).json({
+    message: "Team member promoted to administrator",
     data,
   });
 });

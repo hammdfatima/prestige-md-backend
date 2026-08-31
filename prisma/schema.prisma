@@ -38,21 +38,31 @@ enum NotificationType {
   MESSAGE
 }
 
+enum InContextConsentType {
+  TELEHEALTH_SESSION
+  CLINICAL_NOTES
+}
+
 model User {
   id             String     @id @default(uuid())
   firstName      String
   lastName       String
-  email          String     @unique
+  email          String
+  emailLookupHash String? @unique
   /// Set by the staff member after they accept the invite — not by admin
   passwordHash   String?
   phone          String?
   avatarUrl      String?
   avatarPublicId String?
   employeeId     String?
+  employeeIdLookupHash String?
   role           UserRole
   status         UserStatus @default(ACTIVE)
   invitedAt      DateTime?
   passwordSetAt  DateTime?
+  failedLoginAttempts Int       @default(0)
+  lockedUntil        DateTime?
+  tokenVersion       Int        @default(0)
   specialty      String?
   medicalLicense String?
   education      String?
@@ -74,17 +84,39 @@ model User {
   visitsAsProvider Visit[] @relation("VisitProvider")
   visitsBooked     Visit[] @relation("VisitBookedBy")
   visitMessages    VisitMessage[] @relation("VisitMessageSender")
+  knownLoginDevices KnownLoginDevice[]
+  loginActivities  LoginActivity[]
+  accountSessions  AccountSession[]
+  patientDeletionRequests Patient[] @relation("PatientDeletionRequests")
+  inContextConsentAcknowledgments InContextConsentAcknowledgment[]
 
   @@index([facilityId])
-  @@index([employeeId])
+  @@index([employeeIdLookupHash])
   @@map("users")
+}
+
+/// Append-only in-context consent acknowledgments (policy version, IP, user agent).
+model InContextConsentAcknowledgment {
+  id            String               @id @default(uuid())
+  userId        String
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  consentType   InContextConsentType
+  policyVersion String
+  ipAddress     String
+  userAgent     String
+  createdAt     DateTime             @default(now())
+
+  @@unique([userId, consentType, policyVersion])
+  @@index([userId, consentType])
+  @@map("in_context_consent_acknowledgments")
 }
 
 model Facility {
   id            String     @id @default(uuid())
   name          String
   managerName   String
-  email         String     @unique
+  email         String
+  emailLookupHash String? @unique
   /// Set by the facility manager after they accept the invite — not by admin
   passwordHash  String?
   location      String
@@ -94,6 +126,9 @@ model Facility {
   status        UserStatus @default(ACTIVE)
   invitedAt     DateTime   @default(now())
   passwordSetAt DateTime?
+  failedLoginAttempts Int       @default(0)
+  lockedUntil        DateTime?
+  tokenVersion       Int        @default(0)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
@@ -101,6 +136,9 @@ model Facility {
   staffLinks UserFacility[]
   patients Patient[]
   emailOtps EmailOtp[]
+  knownLoginDevices KnownLoginDevice[]
+  loginActivities  LoginActivity[]
+  accountSessions  AccountSession[]
 
   @@map("facilities")
 }
@@ -116,6 +154,11 @@ model UserFacility {
   @@map("user_facilities")
 }
 
+enum OtpPurpose {
+  PASSWORD_RESET
+  LOGIN_MFA
+}
+
 model EmailOtp {
   id         String    @id @default(uuid())
   userId     String?
@@ -123,13 +166,91 @@ model EmailOtp {
   facilityId String?
   facility   Facility? @relation(fields: [facilityId], references: [id], onDelete: Cascade)
   code       String
+  purpose    OtpPurpose @default(PASSWORD_RESET)
+  failedAttempts Int    @default(0)
   expiresAt  DateTime
   consumedAt DateTime?
   createdAt  DateTime  @default(now())
 
-  @@index([userId, expiresAt])
-  @@index([facilityId, expiresAt])
+  @@index([userId, purpose, expiresAt])
+  @@index([facilityId, purpose, expiresAt])
   @@map("email_otps")
+}
+
+/// HIPAA §3.2 append-only security audit log. Application code must only INSERT.
+/// DB triggers reject UPDATE/DELETE. Retain at least 6 years (see audit-retention.ts).
+model SecurityAuditEvent {
+  id             String   @id @default(uuid())
+  eventType      String
+  actorId        String
+  actorRole      String
+  actorEmail     String
+  actorEmailLookupHash String?
+  targetResource String
+  ipAddress      String
+  userAgent      String
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([actorId, createdAt])
+  @@index([actorEmailLookupHash, createdAt])
+  @@index([eventType, createdAt])
+  @@index([createdAt])
+  @@map("security_audit_events")
+}
+
+model KnownLoginDevice {
+  id                String   @id @default(uuid())
+  userId            String?
+  user              User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facilityId        String?
+  facility          Facility? @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  deviceFingerprint String
+  deviceLabel       String?
+  firstSeenAt       DateTime @default(now())
+  lastSeenAt        DateTime @updatedAt
+
+  @@unique([userId, deviceFingerprint])
+  @@unique([facilityId, deviceFingerprint])
+  @@map("known_login_devices")
+}
+
+model LoginActivity {
+  id                   String    @id @default(uuid())
+  userId               String?
+  user                 User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facilityId           String?
+  facility             Facility? @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  deviceFingerprint    String
+  deviceLabel          String?
+  ipAddress            String?
+  isNewDevice          Boolean   @default(false)
+  reportToken          String    @unique
+  reportTokenExpiresAt DateTime
+  reportedAt           DateTime?
+  createdAt            DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([facilityId, createdAt])
+  @@map("login_activities")
+}
+
+model AccountSession {
+  id                String    @id @default(uuid())
+  userId            String?
+  user              User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facilityId        String?
+  facility          Facility? @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  deviceFingerprint String
+  deviceLabel       String
+  ipAddress         String?
+  userAgent         String?
+  createdAt         DateTime  @default(now())
+  lastActiveAt      DateTime  @default(now())
+  revokedAt         DateTime?
+
+  @@index([userId, revokedAt, lastActiveAt])
+  @@index([facilityId, revokedAt, lastActiveAt])
+  @@map("account_sessions")
 }
 
 enum YesNoAnswer {
@@ -172,8 +293,9 @@ model Patient {
   firstName      String
   lastName       String
   email          String?
+  emailLookupHash String? @unique
   phone          String
-  dateOfBirth    DateTime @db.Date
+  dateOfBirth    String
   avatarUrl      String
   avatarPublicId String?
 
@@ -193,7 +315,7 @@ model Patient {
   insuranceGroupNumber            String
   insuranceSubscriberName         String
   insuranceSubscriberRelationship String
-  insuranceEffectiveDate          DateTime @db.Date
+  insuranceEffectiveDate          String
   insurancePhone                  String
 
   facilityId String
@@ -242,18 +364,26 @@ model Patient {
   examinerTitle         ExaminerTitle
   examinerPhone         String
   examinerAddress       String
-  examinationDate       DateTime @db.Date
+  examinationDate       String
 
   nurseNotes String @default("")
   medications PatientMedication[]
   visits      Visit[]
+
+  /// Admin-initiated staged deletion — clinical data retained until retention window elapses.
+  deletionRequestedAt       DateTime?
+  deletionRequestedByUserId String?
+  deletionRequestedBy       User?     @relation("PatientDeletionRequests", fields: [deletionRequestedByUserId], references: [id], onDelete: SetNull)
+  anonymizedAt              DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([facilityId])
   @@index([createdByUserId])
-  @@index([email])
+  @@index([emailLookupHash])
+  @@index([deletionRequestedAt])
+  @@index([anonymizedAt])
   @@map("patients")
 }
 

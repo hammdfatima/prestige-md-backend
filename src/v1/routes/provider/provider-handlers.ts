@@ -12,7 +12,7 @@ import * as providerService from "~/services/provider-service";
 export const createProviderHandler = asyncHandler(async (req, res) => {
   try {
     const body = createProviderSchema.parse(req.body);
-    const result = await providerService.createProvider(body);
+    const result = await providerService.createProvider(getAuthUser(req), body);
     return res.status(HttpStatus.CREATED).json({
       message: result.emailSent
         ? "Invite link sent to the provider"

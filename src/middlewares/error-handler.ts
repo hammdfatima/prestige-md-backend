@@ -1,4 +1,9 @@
 import logger from "~/lib/logger";
+import { sanitizeLogMessage } from "~/lib/sanitize-for-log";
+import {
+  httpStatusToErrorCode,
+  type ApiErrorDetail,
+} from "~/lib/api-response";
 import type { Request, Response, NextFunction } from "express";
 
 const errorHandler = (
@@ -7,24 +12,40 @@ const errorHandler = (
   res: Response,
   _next: NextFunction,
 ) => {
-  logger.debug("Running for testing");
-  logger.error(err.stack); // Log the error stack trace for debugging
-  // Set the status code based on the error type
+  logger.error(sanitizeLogMessage(err.stack ?? err.message));
   const statusCode = err instanceof HttpError ? err.statusCode : 500;
 
-  // Send the error response
   return res.status(statusCode).json({
-    message: err.message || "Internal Server Error",
+    success: false,
+    error: {
+      code:
+        err instanceof HttpError
+          ? err.code
+          : httpStatusToErrorCode(statusCode),
+      message: err.message || "Internal Server Error",
+      ...(err instanceof HttpError && err.details?.length
+        ? { details: err.details }
+        : {}),
+    },
   });
 };
 
 export default errorHandler;
 
-// Define a custom HttpError class for handling specific status codes
 export class HttpError extends Error {
   statusCode: number;
-  constructor(message: string, statusCode: number) {
+  code: string;
+  details?: ApiErrorDetail[];
+
+  constructor(
+    message: string,
+    statusCode: number,
+    code?: string,
+    details?: ApiErrorDetail[],
+  ) {
     super(message);
     this.statusCode = statusCode;
+    this.code = code ?? httpStatusToErrorCode(statusCode);
+    this.details = details;
   }
 }

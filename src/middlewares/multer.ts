@@ -1,36 +1,46 @@
 import multer from "multer";
 import path from "node:path";
+
+import {
+  ALLOWED_UPLOAD_MIME_TYPES,
+  OBJECT_STORAGE_MAX_BYTES,
+} from "~/lib/object-storage-policy";
 import { HttpError } from "./error-handler";
 
 const destinationPath = path.join(__dirname, "../../data");
-const imagePattern = /\.(jpeg|jpg|png|svg|webp)$/i;
-const docPattern = /\.(pdf|doc|docx)$/i;
 
 type UploadVariant = "image" | "docs" | "both";
 
+const IMAGE_MIME_TYPES = new Set(
+  ALLOWED_UPLOAD_MIME_TYPES.filter((mime) => mime.startsWith("image/")),
+);
+
+const DOCUMENT_MIME_TYPES = new Set(
+  ALLOWED_UPLOAD_MIME_TYPES.filter((mime) => !mime.startsWith("image/")),
+);
+
+function allowedMimeTypesForVariant(variant: UploadVariant) {
+  if (variant === "image") {
+    return IMAGE_MIME_TYPES;
+  }
+  if (variant === "docs") {
+    return DOCUMENT_MIME_TYPES;
+  }
+  return new Set(ALLOWED_UPLOAD_MIME_TYPES);
+}
+
 function fileFilter(variant: UploadVariant): multer.Options["fileFilter"] {
+  const allowed = allowedMimeTypesForVariant(variant);
+
   return (_req, file, cb) => {
-    const name = file.originalname;
-    if (variant === "image") {
-      if (!name.match(imagePattern)) {
-        return cb(
-          new HttpError("Invalid file type, only images are allowed", 400),
-        );
-      }
-    } else if (variant === "docs") {
-      if (!name.match(docPattern)) {
-        return cb(
-          new HttpError("Invalid file type, only documents are allowed", 400),
-        );
-      }
-    } else if (!name.match(imagePattern) && !name.match(docPattern)) {
+    const mimeType = file.mimetype.trim().toLowerCase();
+
+    if (!allowed.has(mimeType)) {
       return cb(
-        new HttpError(
-          "Invalid file type, only images and documents are allowed",
-          400,
-        ),
+        new HttpError("Invalid file type — only allowed uploads are permitted", 400),
       );
     }
+
     cb(null, true);
   };
 }
@@ -52,7 +62,7 @@ function upload(variant: UploadVariant) {
 function memoryUpload(variant: UploadVariant) {
   return multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: { fileSize: OBJECT_STORAGE_MAX_BYTES },
     fileFilter: fileFilter(variant),
   });
 }

@@ -4,6 +4,7 @@ import prisma from "~/lib/db";
 import { notifyVisitMessageInApp } from "~/lib/notifications/visit-notifications";
 import { emitVisitMessage, emitVisitUnread } from "~/lib/socket";
 import { HttpError } from "~/middlewares/error-handler";
+import { assertCallerOwnsObjectKey } from "~/lib/object-key-ownership";
 import type { SendVisitMessageBody } from "~/schemas/visit-schemas";
 import { getVisit } from "~/services/visit-service";
 import type { TokenPayload } from "~/types";
@@ -148,6 +149,10 @@ export async function sendVisitMessage(
       "Message text or attachment is required",
       HttpStatus.BAD_REQUEST,
     );
+  }
+
+  if (attachment?.publicId) {
+    assertCallerOwnsObjectKey(auth, attachment.publicId);
   }
 
   const message = await prisma.visitMessage.create({

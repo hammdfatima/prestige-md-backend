@@ -1,6 +1,6 @@
 import { format } from "date-fns"
 import type { User, VisitStatus } from "~/generated/prisma/client"
-import env from "~/env"
+import { getAppBaseUrl } from "~/lib/app-url"
 import {
   buildVisitBookedEmail,
   buildVisitReminderEmail,
@@ -31,7 +31,7 @@ export type VisitEmailPayload = {
 }
 
 function appUrl() {
-  return (env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "")
+  return getAppBaseUrl()
 }
 
 function personName(user: VisitEmailParticipant) {

@@ -7,6 +7,17 @@
     "build": "prisma generate && npx @biomejs/biome lint ./src && tsc -p tsconfig.json && tsc-alias",
     "lint": "npx @biomejs/biome lint ./src",
     "start": "node dist/server.js",
+    "encrypt:backfill": "ts-node -r tsconfig-paths/register scripts/backfill-field-encryption.ts",
+    "kms:generate-dek": "ts-node -r tsconfig-paths/register scripts/generate-kms-wrapped-dek.ts",
+    "retention:run": "ts-node -r tsconfig-paths/register scripts/run-retention-job.ts",
+    "compliance:check-dictionary": "ts-node -r tsconfig-paths/register scripts/check-phi-data-dictionary.ts",
+    "compliance:check-traceability": "ts-node -r tsconfig-paths/register scripts/check-control-traceability.ts",
+    "compliance:generate-er": "ts-node -r tsconfig-paths/register scripts/generate-er-diagram.ts",
+    "compliance:check": "ts-node -r tsconfig-paths/register scripts/check-compliance-docs.ts",
+    "check:sensitive-logging": "ts-node -r tsconfig-paths/register scripts/check-sensitive-logging.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "provision:admin": "ts-node -r tsconfig-paths/register scripts/provision-admin.ts",
     "postinstall": "prisma generate"
   },
   "keywords": [],
@@ -29,9 +40,11 @@
     "ts-node": "^10.9.2",
     "tsc-alias": "^1.8.16",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.888.0",
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "agora-token": "^2.0.5",

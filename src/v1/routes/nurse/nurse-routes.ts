@@ -6,6 +6,7 @@ import {
   requireAdmin,
   requireAuth,
   requirePermission,
+  requirePermissionForTeamMember,
 } from "~/middlewares/auth";
 import { multer_memory_img } from "~/middlewares/multer";
 import { schemaParseMiddleWare } from "~/middlewares/zod-validator";
@@ -26,6 +27,7 @@ const NURSE_ROUTER = Router();
 NURSE_ROUTER.get(
   "/",
   requireAuth(UserRole.ADMIN, UserRole.TEAM_MEMBER, UserRole.FACILITY_MANAGER),
+  requirePermissionForTeamMember("manage_nurses"),
   schemaParseMiddleWare(listNursesQuerySchema, "query"),
   listNursesHandler,
 );

@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  ALLOWED_UPLOAD_MIME_TYPES,
+  OBJECT_STORAGE_MAX_BYTES,
+} from "~/lib/object-storage-policy";
+
 export const createVisitSchema = z.object({
   patientId: z.uuid("Invalid patient id"),
   providerId: z.uuid("Invalid provider id"),
@@ -34,9 +39,22 @@ export const updateVisitNotesSchema = z
 export const visitMessageAttachmentSchema = z.object({
   url: z.string().url("Invalid attachment url"),
   publicId: z.string().min(1, "Attachment public id is required"),
-  mimeType: z.string().min(1, "Attachment mime type is required"),
+  mimeType: z
+    .string()
+    .min(1, "Attachment mime type is required")
+    .refine(
+      (value) =>
+        ALLOWED_UPLOAD_MIME_TYPES.includes(value.trim().toLowerCase()),
+      "Unsupported attachment type",
+    ),
   filename: z.string().min(1, "Attachment filename is required"),
-  bytes: z.number().int().nonnegative().nullable().optional(),
+  bytes: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(OBJECT_STORAGE_MAX_BYTES, "Attachment exceeds size limit")
+    .nullable()
+    .optional(),
 });
 
 export const sendVisitMessageSchema = z

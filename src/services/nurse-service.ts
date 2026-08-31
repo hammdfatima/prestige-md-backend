@@ -1,18 +1,30 @@
 import { status as HttpStatus } from "http-status";
 import type { Express } from "express";
 import { UserRole, UserStatus, type User } from "~/generated/prisma/client";
-import env from "~/env";
+import { getAppBaseUrl } from "~/lib/app-url";
 import {
   toUploadedFile,
   uploadBuffer,
 } from "~/lib/cloudinary";
+import {
+  buildUserObjectPrefix,
+  assertOptionalCallerOwnsObjectKey,
+} from "~/lib/object-key-ownership";
 import prisma from "~/lib/db";
+import {
+  employeeIdWhere,
+  facilityEmailWhere,
+  userEmailWhere,
+} from "~/lib/encryption-queries";
 import {
   buildStaffInviteEmail,
   createStaffInviteToken,
 } from "~/lib/facility-invite";
 import { sendEmail } from "~/lib/mailer";
 import { HttpError } from "~/middlewares/error-handler";
+import { hasTeamPermission } from "~/lib/permissions";
+import { recordMatchesSearch } from "~/lib/encrypted-search";
+import { invalidateUserCredentials } from "~/services/session-revocation-service";
 import type { TokenPayload } from "~/types";
 import type {
   CreateNurseBody,
@@ -72,7 +84,7 @@ async function sendNurseInvite(nurse: NurseRecord) {
     userId: nurse.id,
     email: nurse.email,
   });
-  const appUrl = (env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  const appUrl = getAppBaseUrl();
   const inviteUrl = `${appUrl}/auth/set-password?token=${encodeURIComponent(token)}`;
 
   return sendEmail(
@@ -86,17 +98,20 @@ async function sendNurseInvite(nurse: NurseRecord) {
   );
 }
 
-async function uploadNurseAvatar(file: Express.Multer.File) {
+async function uploadNurseAvatar(
+  auth: TokenPayload,
+  file: Express.Multer.File,
+) {
   const result = await uploadBuffer(file.buffer, {
-    folder: "prestigemd/nurses",
-    resource_type: "image",
-    filename: file.originalname,
+    folder: buildUserObjectPrefix(auth),
     mimeType: file.mimetype,
+    filename: file.originalname,
   });
   return toUploadedFile(result, file.originalname);
 }
 
 export async function createNurse(
+  auth: TokenPayload,
   input: CreateNurseBody,
   file?: Express.Multer.File,
 ) {
@@ -120,9 +135,9 @@ export async function createNurse(
   }
 
   const [emailUser, emailFacility, existingEmployee] = await Promise.all([
-    prisma.user.findUnique({ where: { email } }),
-    prisma.facility.findUnique({ where: { email } }),
-    prisma.user.findFirst({ where: { employeeId } }),
+    prisma.user.findUnique({ where: userEmailWhere(email) }),
+    prisma.facility.findUnique({ where: facilityEmailWhere(email) }),
+    prisma.user.findFirst({ where: employeeIdWhere(employeeId) }),
   ]);
 
   if (emailUser || emailFacility) {
@@ -149,8 +164,10 @@ export async function createNurse(
     );
   }
 
+  assertOptionalCallerOwnsObjectKey(auth, avatarPublicId);
+
   if (file?.buffer?.byteLength) {
-    const uploaded = await uploadNurseAvatar(file);
+    const uploaded = await uploadNurseAvatar(auth, file);
     avatarUrl = uploaded.secureUrl;
     avatarPublicId = uploaded.publicId;
   }
@@ -192,23 +209,24 @@ export async function listNurses(query: ListNursesQuery) {
       role: UserRole.NURSE,
       status: query.status,
       facilityId: query.facilityId,
-      ...(search
-        ? {
-            OR: [
-              { firstName: { contains: search, mode: "insensitive" } },
-              { lastName: { contains: search, mode: "insensitive" } },
-              { email: { contains: search, mode: "insensitive" } },
-              { employeeId: { contains: search, mode: "insensitive" } },
-              { phone: { contains: search, mode: "insensitive" } },
-            ],
-          }
-        : {}),
     },
     include: nurseInclude,
     orderBy: { createdAt: "desc" },
   });
 
-  return withPatientsManaged(nurses);
+  const filtered = search
+    ? nurses.filter((nurse) =>
+        recordMatchesSearch(nurse, search, [
+          "firstName",
+          "lastName",
+          "email",
+          "employeeId",
+          "phone",
+        ]),
+      )
+    : nurses;
+
+  return withPatientsManaged(filtered);
 }
 
 export async function listNursesForViewer(
@@ -220,7 +238,7 @@ export async function listNursesForViewer(
   }
 
   if (auth.role === UserRole.TEAM_MEMBER) {
-    if (!(auth.permissions ?? []).includes("manage_nurses")) {
+    if (!hasTeamPermission(auth, "manage_nurses")) {
       throw new HttpError(
         "You do not have access to this resource",
         HttpStatus.FORBIDDEN,
@@ -267,6 +285,8 @@ export async function blockNurse(id: string) {
     data: { status: UserStatus.INACTIVE },
     include: nurseInclude,
   });
+
+  await invalidateUserCredentials(updated.id, updated.role);
 
   return publicNurse(updated);
 }

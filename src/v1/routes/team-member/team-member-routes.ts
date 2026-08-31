@@ -5,6 +5,7 @@ import { schemaParseMiddleWare } from "~/middlewares/zod-validator";
 import {
   createTeamMemberSchema,
   listTeamMembersQuerySchema,
+  promoteTeamMemberSchema,
   teamMemberIdParamsSchema,
   updateTeamMemberSchema,
 } from "~/schemas/team-member-schemas";
@@ -13,6 +14,7 @@ import {
   createTeamMemberHandler,
   getTeamMemberHandler,
   listTeamMembersHandler,
+  promoteTeamMemberHandler,
   resendTeamMemberInviteHandler,
   unblockTeamMemberHandler,
   updateTeamMemberHandler,
@@ -45,6 +47,13 @@ TEAM_MEMBER_ROUTER.patch(
   schemaParseMiddleWare(teamMemberIdParamsSchema, "params"),
   schemaParseMiddleWare(updateTeamMemberSchema),
   updateTeamMemberHandler,
+);
+
+TEAM_MEMBER_ROUTER.post(
+  "/:id/promote-admin",
+  schemaParseMiddleWare(teamMemberIdParamsSchema, "params"),
+  schemaParseMiddleWare(promoteTeamMemberSchema),
+  promoteTeamMemberHandler,
 );
 
 TEAM_MEMBER_ROUTER.patch(

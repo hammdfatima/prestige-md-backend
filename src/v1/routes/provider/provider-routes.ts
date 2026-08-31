@@ -4,6 +4,7 @@ import {
   requireAdmin,
   requireAuth,
   requirePermission,
+  requirePermissionForTeamMember,
 } from "~/middlewares/auth";
 import { schemaParseMiddleWare } from "~/middlewares/zod-validator";
 import {
@@ -29,12 +30,17 @@ PROVIDER_ROUTER.get(
     UserRole.TEAM_MEMBER,
     UserRole.DOCTOR,
   ),
+  requirePermissionForTeamMember(
+    "manage_appointments",
+    "manage_doctors",
+  ),
   listAvailableProvidersHandler,
 );
 
 PROVIDER_ROUTER.get(
   "/",
   requireAuth(UserRole.ADMIN, UserRole.TEAM_MEMBER, UserRole.FACILITY_MANAGER),
+  requirePermissionForTeamMember("manage_doctors"),
   schemaParseMiddleWare(listProvidersQuerySchema, "query"),
   listProvidersHandler,
 );

@@ -13,6 +13,11 @@ export interface IAuthRequest<T = Empty, P = Empty, Q = Empty>
 export type TokenPayload = {
   id: string;
   role: UserRole;
+  tokenVersion?: number;
+  /** Per-device session id — revoked independently of account tokenVersion. */
+  sessionId?: string;
+  /** Unix ms — updated on login and session heartbeat. */
+  lastActiveAt?: number;
   permissions?: string[];
   facilityId?: string | null;
 };

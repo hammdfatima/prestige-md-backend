@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { UserRole } from "~/generated/prisma/client";
-import { requireAuth, requireDoctor, requireNurse } from "~/middlewares/auth";
+import { requireAuth, requireDoctor, requireNurse, requirePermissionForTeamMember } from "~/middlewares/auth";
+import { requireVisitParamAccess } from "~/middlewares/resource-access";
 import { schemaParseMiddleWare } from "~/middlewares/zod-validator";
 import {
   createVisitSchema,
@@ -34,6 +35,7 @@ VISIT_ROUTER.get(
     UserRole.TEAM_MEMBER,
     UserRole.FACILITY_MANAGER,
   ),
+  requirePermissionForTeamMember("manage_appointments"),
   schemaParseMiddleWare(listVisitsQuerySchema, "query"),
   listVisitsHandler,
 );
@@ -47,7 +49,9 @@ VISIT_ROUTER.get(
     UserRole.TEAM_MEMBER,
     UserRole.FACILITY_MANAGER,
   ),
+  requirePermissionForTeamMember("manage_appointments"),
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   getVisitHandler,
 );
 
@@ -62,6 +66,7 @@ VISIT_ROUTER.post(
   "/:id/join",
   requireAuth(UserRole.DOCTOR, UserRole.NURSE),
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   joinVisitHandler,
 );
 
@@ -69,6 +74,7 @@ VISIT_ROUTER.post(
   "/:id/leave",
   requireAuth(UserRole.DOCTOR, UserRole.NURSE),
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   leaveVisitHandler,
 );
 
@@ -76,6 +82,7 @@ VISIT_ROUTER.patch(
   "/:id/notes",
   requireDoctor,
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   schemaParseMiddleWare(updateVisitNotesSchema),
   updateVisitNotesHandler,
 );
@@ -84,6 +91,7 @@ VISIT_ROUTER.post(
   "/:id/complete",
   requireDoctor,
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   completeVisitHandler,
 );
 
@@ -91,6 +99,7 @@ VISIT_ROUTER.post(
   "/:id/cancel",
   requireNurse,
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   cancelVisitHandler,
 );
 
@@ -98,6 +107,7 @@ VISIT_ROUTER.get(
   "/:id/messages",
   requireAuth(UserRole.DOCTOR, UserRole.NURSE),
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   listVisitMessagesHandler,
 );
 
@@ -105,6 +115,7 @@ VISIT_ROUTER.get(
   "/:id/messages/unread-count",
   requireAuth(UserRole.DOCTOR, UserRole.NURSE),
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   getVisitUnreadCountHandler,
 );
 
@@ -112,6 +123,7 @@ VISIT_ROUTER.post(
   "/:id/messages",
   requireAuth(UserRole.DOCTOR, UserRole.NURSE),
   schemaParseMiddleWare(visitIdParamsSchema, "params"),
+  requireVisitParamAccess(),
   schemaParseMiddleWare(sendVisitMessageSchema),
   sendVisitMessageHandler,
 );

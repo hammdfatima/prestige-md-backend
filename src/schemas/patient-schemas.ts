@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { stepUpTokenField } from "~/schemas/step-up-schemas";
 
 const yesNoSchema = z.enum(["yes", "no"], {
   message: "Select yes or no",
@@ -150,7 +151,27 @@ export const patientIdParamsSchema = z.object({
   id: z.uuid("Invalid patient id"),
 });
 
+export const patientDeletionRequestBodySchema = z.object({
+  stepUpToken: stepUpTokenField,
+});
+
+export const exportPatientQuerySchema = z.object({
+  stepUpToken: stepUpTokenField,
+});
+
+export const deletePatientBodySchema = patientDeletionRequestBodySchema;
+
+export const exportPatientsQuerySchema = z.object({
+  stepUpToken: stepUpTokenField,
+});
+
 export type CreatePatientBody = z.infer<typeof createPatientSchema>;
 export type UpdatePatientBody = CreatePatientBody;
 export type ListPatientsQuery = z.infer<typeof listPatientsQuerySchema>;
 export type PatientIdParams = z.infer<typeof patientIdParamsSchema>;
+export type DeletePatientBody = z.infer<typeof deletePatientBodySchema>;
+export type PatientDeletionRequestBody = z.infer<
+  typeof patientDeletionRequestBodySchema
+>;
+export type ExportPatientQuery = z.infer<typeof exportPatientQuerySchema>;
+export type ExportPatientsQuery = z.infer<typeof exportPatientsQuerySchema>;

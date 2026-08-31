@@ -12,7 +12,7 @@ import * as nurseService from "~/services/nurse-service";
 export const createNurseHandler = asyncHandler(async (req, res) => {
   try {
     const body = createNurseSchema.parse(req.body);
-    const result = await nurseService.createNurse(body, req.file);
+    const result = await nurseService.createNurse(getAuthUser(req), body, req.file);
     return res.status(HttpStatus.CREATED).json({
       message: result.emailSent
         ? "Invite link sent to the nurse"

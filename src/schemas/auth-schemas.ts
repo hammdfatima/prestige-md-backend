@@ -1,5 +1,6 @@
 import { z } from "zod"
-import { strongPasswordSchema } from "~/lib/password"
+import { LOGIN_MFA_CODE_LENGTH } from "~/lib/mfa"
+import { newPasswordSchema } from "~/lib/password"
 
 export const loginSchema = z.object({
   email: z.email("Enter a valid email address"),
@@ -11,21 +12,13 @@ export const forgotPasswordSchema = z.object({
   email: z.email("Enter a valid email address"),
 })
 
-export const createAdminSchema = z.object({
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
-  email: z.email("Enter a valid email address"),
-  password: strongPasswordSchema,
-  phone: z.string().optional(),
-})
-
 export const facilityInviteQuerySchema = z.object({
   token: z.string().min(1, "Invite token is required"),
 })
 
 export const setFacilityPasswordSchema = z.object({
   token: z.string().min(1, "Invite token is required"),
-  password: strongPasswordSchema,
+  password: newPasswordSchema,
 })
 
 export const updateMeSchema = z.object({
@@ -50,24 +43,44 @@ export const updateAvailabilitySchema = z.object({
 
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Current password is required"),
-  newPassword: strongPasswordSchema,
+  newPassword: newPasswordSchema,
 })
 
 export const resetPasswordSchema = z.object({
-  email: z.email("Enter a valid email address"),
+  token: z.string().min(1, "This reset link is invalid or has expired"),
+  password: newPasswordSchema,
+})
+
+export const verifyLoginOtpSchema = z.object({
+  challengeToken: z.string().min(1, "Login session expired. Please sign in again."),
   code: z
     .string()
-    .length(4, "Enter the 4-digit code")
-    .regex(/^\d{4}$/, "Enter the 4-digit code"),
-  password: strongPasswordSchema,
+    .length(
+      LOGIN_MFA_CODE_LENGTH,
+      `Enter the ${LOGIN_MFA_CODE_LENGTH}-digit code`,
+    )
+    .regex(
+      new RegExp(`^\\d{${LOGIN_MFA_CODE_LENGTH}}$`),
+      `Enter the ${LOGIN_MFA_CODE_LENGTH}-digit code`,
+    ),
+})
+
+export const resendLoginOtpSchema = z.object({
+  challengeToken: z.string().min(1, "Login session expired. Please sign in again."),
+})
+
+export const reportLoginSchema = z.object({
+  token: z.string().min(1, "This security link is invalid."),
 })
 
 export type LoginBody = z.infer<typeof loginSchema>
 export type ForgotPasswordBody = z.infer<typeof forgotPasswordSchema>
-export type CreateAdminBody = z.infer<typeof createAdminSchema>
 export type FacilityInviteQuery = z.infer<typeof facilityInviteQuerySchema>
 export type SetFacilityPasswordBody = z.infer<typeof setFacilityPasswordSchema>
 export type UpdateMeBody = z.infer<typeof updateMeSchema>
 export type UpdateAvailabilityBody = z.infer<typeof updateAvailabilitySchema>
 export type ChangePasswordBody = z.infer<typeof changePasswordSchema>
 export type ResetPasswordBody = z.infer<typeof resetPasswordSchema>
+export type VerifyLoginOtpBody = z.infer<typeof verifyLoginOtpSchema>
+export type ResendLoginOtpBody = z.infer<typeof resendLoginOtpSchema>
+export type ReportLoginBody = z.infer<typeof reportLoginSchema>

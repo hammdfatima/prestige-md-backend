@@ -3,20 +3,34 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
+import { sanitizeLogMessage } from "~/lib/sanitize-for-log";
 import env from "~/env";
+import { getAppBaseUrl } from "~/lib/app-url";
+import { getHelmetOptions } from "~/lib/security-headers";
 import errorHandle from "~/middlewares/error-handler";
+import { apiResponseEnvelopeMiddleware } from "~/middlewares/api-response-envelope";
+import { httpsRedirect } from "~/middlewares/https-redirect";
 import logger from "~/lib/logger";
 import MAIN_ROUTER from "~/v1/routes/index";
 import { initSocket } from "~/lib/socket";
 import prisma from "./lib/db";
+import { ensureSecurityAuditAppendOnlyGuards } from "./lib/security-audit-db-guards";
 import { configureCloudinary } from "./lib/cloudinary";
+import { ensureCloudinaryUploadPolicy } from "./lib/cloudinary-policy-setup";
 import { limiter } from "./middlewares/rate-limiter";
-import { startKeepAliveJob } from "./jobs/keep-alive-job";
 import { startVisitReminderJob } from "./jobs/visit-reminder-job";
+import { startRetentionJob } from "./jobs/retention-job";
+import { initializeKeyManagement } from "./lib/key-management";
 
 const app = express();
 
 const server = createServer(app);
+
+app.set("trust proxy", 1);
+
+app.use(httpsRedirect);
+app.use(helmet(getHelmetOptions()));
+app.disable("x-powered-by");
 
 app.get("/health", (_req, res) => {
   res.status(200).json({
@@ -36,7 +50,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use(
   cors({
-    origin: env.APP_URL ?? "http://localhost:3000",
+    origin: getAppBaseUrl(),
     credentials: true,
   }),
 );
@@ -44,21 +58,21 @@ app.use(
 app.use(limiter);
 
 app.use(
-  helmet({
-    frameguard: { action: "deny" }, // Prevent click jacking
-    referrerPolicy: { policy: "no-referrer" }, // Hide referrer information
-    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true }, //HSTS header to force the use of HTTPS.
-    noSniff: true, //Prevent Sniffing of MIME Types
+  morgan(process.env.NODE_ENV === "production" ? "combined" : "dev", {
+    stream: {
+      write: (message) => {
+        logger.info(sanitizeLogMessage(message.trim()));
+      },
+    },
   }),
 );
-
-app.disable("x-powered-by"); //reduce fingerprinting
-
-app.use(morgan("dev"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// API routes
+app.use(apiResponseEnvelopeMiddleware);
+
+// Versioned API — /api/v1 is canonical; /api is a backward-compatible alias.
+app.use("/api/v1", MAIN_ROUTER);
 app.use("/api", MAIN_ROUTER);
 
 // Error handler middleware
@@ -68,14 +82,25 @@ app.use(errorHandle);
 const port = Number(process.env.PORT) || env.PORT_NO;
 /* eslint-enable node/no-process-env */
 
-// Start the server
-server.listen(port, () => {
-  logger.info(`Server started on port :${port}`);
-  initSocket(server);
-  configureCloudinary();
-  startVisitReminderJob();
-  startKeepAliveJob();
-  prisma.$connect().then(() => {
-    logger.info("Connected to the database successfully!");
+async function start() {
+  await prisma.$connect();
+  logger.info("Connected to the database successfully!");
+  await initializeKeyManagement();
+  await ensureSecurityAuditAppendOnlyGuards();
+
+  server.listen(port, () => {
+    logger.info(`Server started on port :${port}`);
+    initSocket(server);
+    configureCloudinary();
+    void ensureCloudinaryUploadPolicy().catch((error) => {
+      logger.warn("Cloudinary upload policy setup skipped:", error);
+    });
+    startVisitReminderJob();
+    startRetentionJob();
   });
+}
+
+void start().catch((error) => {
+  logger.error("Failed to start server:", error);
+  process.exit(1);
 });

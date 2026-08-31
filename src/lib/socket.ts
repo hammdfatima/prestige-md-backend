@@ -1,9 +1,11 @@
 import type { Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import { UserRole } from "~/generated/prisma/client";
-import env from "~/env";
+import { getAppBaseUrl } from "~/lib/app-url";
 import prisma from "~/lib/db";
 import { verifyToken } from "~/lib/jwt";
+import { validateSessionToken } from "~/lib/validate-session-token";
+import { assertVisitAccessForViewer } from "~/services/visit-service";
 import logger from "~/lib/logger";
 import type { TokenPayload } from "~/types";
 
@@ -25,8 +27,7 @@ export type ProviderAvailabilityPayload = {
 };
 
 type SocketAuthData = {
-  userId: string;
-  role: TokenPayload["role"];
+  auth: TokenPayload;
 };
 
 async function markDoctorUnavailable(doctorId: string) {
@@ -80,32 +81,37 @@ function scheduleDoctorOffline(doctorId: string) {
 }
 
 function trackDoctorConnection(socket: Socket) {
-  const { userId, role } = socket.data as SocketAuthData;
-  if (role !== UserRole.DOCTOR) {
+  const { auth } = socket.data as SocketAuthData;
+  if (auth.role !== UserRole.DOCTOR) {
     return;
   }
 
-  cancelDoctorOfflineTimer(userId);
+  cancelDoctorOfflineTimer(auth.id);
   doctorConnectionCounts.set(
-    userId,
-    (doctorConnectionCounts.get(userId) ?? 0) + 1,
+    auth.id,
+    (doctorConnectionCounts.get(auth.id) ?? 0) + 1,
   );
 
   socket.on("disconnect", () => {
-    const remaining = (doctorConnectionCounts.get(userId) ?? 1) - 1;
+    const remaining = (doctorConnectionCounts.get(auth.id) ?? 1) - 1;
     if (remaining <= 0) {
-      doctorConnectionCounts.delete(userId);
-      scheduleDoctorOffline(userId);
+      doctorConnectionCounts.delete(auth.id);
+      scheduleDoctorOffline(auth.id);
       return;
     }
-    doctorConnectionCounts.set(userId, remaining);
+    doctorConnectionCounts.set(auth.id, remaining);
   });
+}
+
+async function assertVisitSocketAccess(socket: Socket, visitId: string) {
+  const { auth } = socket.data as SocketAuthData;
+  await assertVisitAccessForViewer(auth, visitId);
 }
 
 export function initSocket(server: HttpServer) {
   io = new Server(server, {
     cors: {
-      origin: env.APP_URL ?? "http://localhost:3000",
+      origin: getAppBaseUrl(),
       credentials: true,
     },
   });
@@ -117,24 +123,11 @@ export function initSocket(server: HttpServer) {
       return;
     }
     try {
-      const payload = verifyToken(token);
-      let role = payload.role;
-
-      if (!role) {
-        const user = await prisma.user.findUnique({
-          where: { id: payload.id },
-          select: { role: true },
-        });
-        role = user?.role ?? payload.role;
-      }
-
-      if (!role) {
-        next(new Error("Invalid or expired token"));
-        return;
-      }
-
-      (socket.data as SocketAuthData).userId = payload.id;
-      (socket.data as SocketAuthData).role = role;
+      const payload = verifyToken(token) as ReturnType<typeof verifyToken> & {
+        iat?: number;
+      };
+      const auth = await validateSessionToken(payload);
+      (socket.data as SocketAuthData).auth = auth;
       next();
     } catch {
       next(new Error("Invalid or expired token"));
@@ -142,13 +135,19 @@ export function initSocket(server: HttpServer) {
   });
 
   io.on("connection", (socket) => {
-    const { userId } = socket.data as SocketAuthData;
+    const { auth } = socket.data as SocketAuthData;
     socket.join("staff");
-    socket.join(`user:${userId}`);
+    socket.join(`user:${auth.id}`);
 
     socket.on("visit:join", (visitId: unknown) => {
       if (typeof visitId !== "string" || !visitId.trim()) return;
-      socket.join(`visit:${visitId}`);
+      void assertVisitSocketAccess(socket, visitId)
+        .then(() => {
+          socket.join(`visit:${visitId}`);
+        })
+        .catch(() => {
+          // Out-of-scope visit IDs are ignored (§16.2).
+        });
     });
 
     socket.on("visit:leave", (visitId: unknown) => {
@@ -161,11 +160,17 @@ export function initSocket(server: HttpServer) {
       const data = payload as { visitId?: unknown; isTyping?: unknown };
       if (typeof data.visitId !== "string" || !data.visitId.trim()) return;
 
-      socket.to(`visit:${data.visitId}`).emit("visit:typing", {
-        visitId: data.visitId,
-        userId,
-        isTyping: Boolean(data.isTyping),
-      });
+      void assertVisitSocketAccess(socket, data.visitId)
+        .then(() => {
+          socket.to(`visit:${data.visitId}`).emit("visit:typing", {
+            visitId: data.visitId,
+            userId: auth.id,
+            isTyping: Boolean(data.isTyping),
+          });
+        })
+        .catch(() => {
+          // Out-of-scope visit IDs are ignored (§16.2).
+        });
     });
 
     trackDoctorConnection(socket);

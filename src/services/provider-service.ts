@@ -1,19 +1,27 @@
 import { status as HttpStatus } from "http-status";
 import { UserRole, UserStatus, type User } from "~/generated/prisma/client";
-import env from "~/env";
+import { getAppBaseUrl } from "~/lib/app-url";
 import prisma from "~/lib/db";
+import {
+  facilityEmailWhere,
+  userEmailWhere,
+} from "~/lib/encryption-queries";
 import {
   buildStaffInviteEmail,
   createStaffInviteToken,
 } from "~/lib/facility-invite";
 import { sendEmail } from "~/lib/mailer";
 import { HttpError } from "~/middlewares/error-handler";
+import { assertOptionalCallerOwnsObjectKey } from "~/lib/object-key-ownership";
+import type { TokenPayload } from "~/types";
+import { hasTeamPermission } from "~/lib/permissions";
+import { recordMatchesSearch } from "~/lib/encrypted-search";
 import type {
   CreateProviderBody,
   ListProvidersQuery,
 } from "~/schemas/provider-schemas";
 import { emitProviderAvailability } from "~/lib/socket";
-import type { TokenPayload } from "~/types";
+import { invalidateUserCredentials } from "~/services/session-revocation-service";
 
 type ProviderRecord = User & {
   facility: { id: string; name: string } | null;
@@ -65,7 +73,7 @@ async function sendProviderInvite(provider: ProviderRecord) {
     userId: provider.id,
     email: provider.email,
   });
-  const appUrl = (env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  const appUrl = getAppBaseUrl();
   const inviteUrl = `${appUrl}/auth/set-password?token=${encodeURIComponent(token)}`;
   const facilityName =
     provider.facilityLinks[0]?.facility.name ??
@@ -83,7 +91,10 @@ async function sendProviderInvite(provider: ProviderRecord) {
   );
 }
 
-export async function createProvider(input: CreateProviderBody) {
+export async function createProvider(
+  auth: TokenPayload,
+  input: CreateProviderBody,
+) {
   const email = input.email.toLowerCase();
   const { firstName, lastName } = splitName(input.name);
   const facilityIds = [...new Set(input.facilityIds)];
@@ -107,8 +118,8 @@ export async function createProvider(input: CreateProviderBody) {
   }
 
   const [emailUser, emailFacility] = await Promise.all([
-    prisma.user.findUnique({ where: { email } }),
-    prisma.facility.findUnique({ where: { email } }),
+    prisma.user.findUnique({ where: userEmailWhere(email) }),
+    prisma.facility.findUnique({ where: facilityEmailWhere(email) }),
   ]);
 
   if (emailUser || emailFacility) {
@@ -134,6 +145,8 @@ export async function createProvider(input: CreateProviderBody) {
       HttpStatus.BAD_REQUEST,
     );
   }
+
+  assertOptionalCallerOwnsObjectKey(auth, avatarPublicId);
 
   const primaryFacilityId = facilityIds[0];
 
@@ -188,26 +201,25 @@ export async function listProviders(query: ListProvidersQuery) {
               },
             ]
           : []),
-        ...(search
-          ? [
-              {
-                OR: [
-                  { firstName: { contains: search, mode: "insensitive" as const } },
-                  { lastName: { contains: search, mode: "insensitive" as const } },
-                  { email: { contains: search, mode: "insensitive" as const } },
-                  { specialty: { contains: search, mode: "insensitive" as const } },
-                  { phone: { contains: search, mode: "insensitive" as const } },
-                ],
-              },
-            ]
-          : []),
       ],
     },
     include: providerInclude,
     orderBy: { createdAt: "desc" },
   });
 
-  return providers.map(publicProvider);
+  const filtered = search
+    ? providers.filter((provider) =>
+        recordMatchesSearch(provider, search, [
+          "firstName",
+          "lastName",
+          "email",
+          "specialty",
+          "phone",
+        ]),
+      )
+    : providers;
+
+  return filtered.map(publicProvider);
 }
 
 export async function listProvidersForViewer(
@@ -219,7 +231,7 @@ export async function listProvidersForViewer(
   }
 
   if (auth.role === UserRole.TEAM_MEMBER) {
-    if (!(auth.permissions ?? []).includes("manage_doctors")) {
+    if (!hasTeamPermission(auth, "manage_doctors")) {
       throw new HttpError(
         "You do not have access to this resource",
         HttpStatus.FORBIDDEN,
@@ -275,6 +287,8 @@ export async function blockProvider(id: string) {
     availability: updated.availability,
     isAvailable: false,
   });
+
+  await invalidateUserCredentials(updated.id, updated.role);
 
   return publicProvider(updated);
 }

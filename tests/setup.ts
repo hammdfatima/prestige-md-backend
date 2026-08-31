@@ -1,0 +1,10 @@
+process.env.NODE_ENV = "test";
+process.env.PORT_NO = "3001";
+process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/prestige_md_test";
+process.env.JWT_SECRET = "unit-test-jwt-secret-do-not-use-in-production";
+process.env.KEY_MANAGEMENT_PROVIDER = "env";
+process.env.DATA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+process.env.RETENTION_JOB_ENABLED = "false";
+process.env.RETENTION_JOB_LIVE = "false";
+process.env.MFA_ENABLED = "false";
+process.env.MALWARE_SCAN_ENABLED = "false";

@@ -1,13 +1,16 @@
 import { status as HttpStatus } from "http-status";
 import { UserStatus, type Facility } from "~/generated/prisma/client";
-import env from "~/env";
+import { getAppBaseUrl } from "~/lib/app-url";
 import {
   buildFacilityInviteEmail,
   createFacilityInviteToken,
 } from "~/lib/facility-invite";
 import { sendEmail } from "~/lib/mailer";
 import prisma from "~/lib/db";
+import { facilityEmailWhere } from "~/lib/encryption-queries";
+import { recordMatchesSearch } from "~/lib/encrypted-search";
 import { HttpError } from "~/middlewares/error-handler";
+import { invalidateFacilityCredentials } from "~/services/session-revocation-service";
 import type {
   CreateFacilityBody,
   ListFacilitiesQuery,
@@ -23,7 +26,7 @@ async function sendFacilityInvite(facility: Facility) {
     facilityId: facility.id,
     email: facility.email,
   });
-  const appUrl = (env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  const appUrl = getAppBaseUrl();
   const inviteUrl = `${appUrl}/auth/set-password?token=${encodeURIComponent(token)}`;
 
   return sendEmail(
@@ -40,7 +43,7 @@ export async function createFacility(input: CreateFacilityBody) {
   const email = input.email.toLowerCase();
 
   const existing = await prisma.facility.findUnique({
-    where: { email },
+    where: facilityEmailWhere(email),
   });
 
   if (existing) {
@@ -76,21 +79,22 @@ export async function listFacilities(query: ListFacilitiesQuery) {
   const facilities = await prisma.facility.findMany({
     where: {
       status: query.status,
-      ...(search
-        ? {
-            OR: [
-              { name: { contains: search, mode: "insensitive" } },
-              { managerName: { contains: search, mode: "insensitive" } },
-              { email: { contains: search, mode: "insensitive" } },
-              { location: { contains: search, mode: "insensitive" } },
-            ],
-          }
-        : {}),
     },
     orderBy: { createdAt: "desc" },
   });
 
-  return facilities.map(publicFacility);
+  const filtered = search
+    ? facilities.filter((facility) =>
+        recordMatchesSearch(facility, search, [
+          "name",
+          "managerName",
+          "email",
+          "location",
+        ]),
+      )
+    : facilities;
+
+  return filtered.map(publicFacility);
 }
 
 async function getFacilityOrThrow(id: string) {
@@ -114,6 +118,8 @@ export async function blockFacility(id: string) {
     where: { id },
     data: { status: UserStatus.INACTIVE },
   });
+
+  await invalidateFacilityCredentials(updated.id);
 
   return publicFacility(updated);
 }

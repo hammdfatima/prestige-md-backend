@@ -13,6 +13,7 @@ import {
 } from "~/lib/emails/visit-notifications";
 import prisma from "~/lib/db";
 import { HttpError } from "~/middlewares/error-handler";
+import { hasTeamPermission } from "~/lib/permissions";
 import type {
   CreateVisitBody,
   ListVisitsQuery,
@@ -23,6 +24,11 @@ import {
   patientInclude,
   publicPatient,
 } from "~/services/patient-service";
+import {
+  assertDoctorClinicalNotesConsent,
+  assertDoctorTelehealthConsent,
+  hasInContextConsent,
+} from "~/services/in-context-consent-service";
 import type { TokenPayload } from "~/types";
 
 const visitInclude = {
@@ -131,7 +137,8 @@ function publicProvider(provider: User) {
   };
 }
 
-function publicVisit(visit: {
+function publicVisit(
+  visit: {
   id: string;
   reason: string;
   status: VisitStatus;
@@ -153,7 +160,11 @@ function publicVisit(visit: {
     phone: string | null;
     employeeId: string | null;
   };
-}) {
+},
+  options: { includeClinicalNotes?: boolean } = {},
+) {
+  const includeClinicalNotes = options.includeClinicalNotes !== false;
+
   return {
     id: visit.id,
     reason: visit.reason,
@@ -161,13 +172,14 @@ function publicVisit(visit: {
     service: visit.reason.trim() || "Video visit",
     scheduledAt: visit.scheduledAt.toISOString(),
     createdAt: visit.createdAt.toISOString(),
-    progressNotes: visit.progressNotes,
+    progressNotes: includeClinicalNotes ? visit.progressNotes : "",
     soapNotes: {
-      subjective: visit.soapSubjective,
-      objective: visit.soapObjective,
-      assessment: visit.soapAssessment,
-      plan: visit.soapPlan,
+      subjective: includeClinicalNotes ? visit.soapSubjective : "",
+      objective: includeClinicalNotes ? visit.soapObjective : "",
+      assessment: includeClinicalNotes ? visit.soapAssessment : "",
+      plan: includeClinicalNotes ? visit.soapPlan : "",
     },
+    clinicalNotesConsentRequired: !includeClinicalNotes,
     patient: publicPatient(visit.patient),
     provider: publicProvider(visit.provider),
     bookedBy: {
@@ -181,6 +193,21 @@ function publicVisit(visit: {
   };
 }
 
+async function publicVisitForAuth(
+  auth: TokenPayload,
+  visit: Parameters<typeof publicVisit>[0],
+) {
+  if (auth.role === UserRole.DOCTOR) {
+    const includeClinicalNotes = await hasInContextConsent(
+      auth.id,
+      "CLINICAL_NOTES",
+    );
+    return publicVisit(visit, { includeClinicalNotes });
+  }
+
+  return publicVisit(visit);
+}
+
 function assertCanListVisits(auth: TokenPayload) {
   if (
     auth.role === UserRole.ADMIN ||
@@ -191,10 +218,7 @@ function assertCanListVisits(auth: TokenPayload) {
     return;
   }
 
-  if (
-    auth.role === UserRole.TEAM_MEMBER &&
-    (auth.permissions ?? []).includes("manage_appointments")
-  ) {
+  if (hasTeamPermission(auth, "manage_appointments")) {
     return;
   }
 
@@ -268,10 +292,7 @@ export async function listVisits(auth: TokenPayload, query: ListVisitsQuery) {
     return [];
   }
 
-  if (
-    query.patientId &&
-    (auth.role === UserRole.NURSE || auth.role === UserRole.FACILITY_MANAGER)
-  ) {
+  if (query.patientId) {
     await getPatientForViewer(auth, query.patientId);
   }
 
@@ -291,12 +312,44 @@ export async function listVisits(auth: TokenPayload, query: ListVisitsQuery) {
     orderBy: { scheduledAt: "desc" },
   });
 
+  if (auth.role === UserRole.DOCTOR) {
+    return Promise.all(visits.map((visit) => publicVisitForAuth(auth, visit)));
+  }
+
   return visits.map((visit) => publicVisit(visit));
 }
 
 export async function getVisit(auth: TokenPayload, id: string) {
   assertCanListVisits(auth);
   await markPastOpenVisitsMissed();
+
+  if (auth.role === UserRole.DOCTOR) {
+    const visit = await prisma.visit.findFirst({
+      where: { id, providerId: auth.id },
+      include: visitInclude,
+    });
+    if (!visit) {
+      throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
+    }
+    return publicVisitForAuth(auth, visit);
+  }
+
+  if (
+    auth.role === UserRole.NURSE ||
+    auth.role === UserRole.FACILITY_MANAGER
+  ) {
+    if (!auth.facilityId) {
+      throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
+    }
+    const visit = await prisma.visit.findFirst({
+      where: { id, patient: { facilityId: auth.facilityId } },
+      include: visitInclude,
+    });
+    if (!visit) {
+      throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
+    }
+    return publicVisit(visit);
+  }
 
   const visit = await prisma.visit.findFirst({
     where: { id },
@@ -307,19 +360,15 @@ export async function getVisit(auth: TokenPayload, id: string) {
     throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
   }
 
-  if (
-    (auth.role === UserRole.NURSE ||
-      auth.role === UserRole.FACILITY_MANAGER) &&
-    visit.patient.facilityId !== auth.facilityId
-  ) {
-    throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
-  }
-
-  if (auth.role === UserRole.DOCTOR && visit.providerId !== auth.id) {
-    throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
-  }
-
   return publicVisit(visit);
+}
+
+/** §16.2 object-level check — throws 404 when visit is out of scope. */
+export async function assertVisitAccessForViewer(
+  auth: TokenPayload,
+  visitId: string,
+) {
+  await getVisit(auth, visitId);
 }
 
 async function getCallVisitOrThrow(auth: TokenPayload, id: string) {
@@ -332,8 +381,23 @@ async function getCallVisitOrThrow(auth: TokenPayload, id: string) {
 
   await markPastOpenVisitsMissed();
 
+  if (auth.role === UserRole.DOCTOR) {
+    const visit = await prisma.visit.findFirst({
+      where: { id, providerId: auth.id },
+      include: visitInclude,
+    });
+    if (!visit) {
+      throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
+    }
+    return visit;
+  }
+
+  if (!auth.facilityId) {
+    throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
+  }
+
   const visit = await prisma.visit.findFirst({
-    where: { id },
+    where: { id, patient: { facilityId: auth.facilityId } },
     include: visitInclude,
   });
 
@@ -341,21 +405,11 @@ async function getCallVisitOrThrow(auth: TokenPayload, id: string) {
     throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
   }
 
-  if (auth.role === UserRole.DOCTOR && visit.providerId !== auth.id) {
-    throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
-  }
-
-  if (
-    auth.role === UserRole.NURSE &&
-    visit.patient.facilityId !== auth.facilityId
-  ) {
-    throw new HttpError("Visit not found", HttpStatus.NOT_FOUND);
-  }
-
   return visit;
 }
 
 export async function joinVisit(auth: TokenPayload, id: string) {
+  await assertDoctorTelehealthConsent(auth);
   const visit = await getCallVisitOrThrow(auth, id);
 
   if (
@@ -431,7 +485,7 @@ export async function joinVisit(auth: TokenPayload, id: string) {
     displayName,
     role: auth.role === UserRole.DOCTOR ? ("DOCTOR" as const) : ("NURSE" as const),
     participants,
-    visit: publicVisit(activeVisit),
+    visit: await publicVisitForAuth(auth, activeVisit),
   };
 }
 
@@ -451,6 +505,8 @@ export async function updateVisitNotes(
       HttpStatus.FORBIDDEN,
     );
   }
+
+  await assertDoctorClinicalNotesConsent(auth);
 
   const visit = await getCallVisitOrThrow(auth, id);
 
@@ -472,7 +528,7 @@ export async function updateVisitNotes(
     include: visitInclude,
   });
 
-  return publicVisit(updated);
+  return publicVisitForAuth(auth, updated);
 }
 
 export async function completeVisit(auth: TokenPayload, id: string) {

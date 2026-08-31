@@ -1,14 +1,27 @@
 import bcrypt from "bcrypt";
 
-export function hashedPass(password: string): string {
-  const hashedPassword = bcrypt.hashSync(password, 10);
-  return hashedPassword;
+/** Target ~200–300ms per hash on typical server hardware. */
+export const BCRYPT_COST_ROUNDS = 12;
+
+export function needsRehash(hash: string): boolean {
+  try {
+    return bcrypt.getRounds(hash) < BCRYPT_COST_ROUNDS;
+  } catch {
+    return true;
+  }
 }
 
-export function comparePassword({
+export async function hashedPass(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_COST_ROUNDS);
+}
+
+/** Constant-time compare via bcrypt — never compare hashes with == or ===. */
+export async function comparePassword({
   password,
   hash,
-}: { password: string; hash: string }): boolean {
-  const compare = bcrypt.compareSync(password, hash);
-  return compare;
+}: {
+  password: string;
+  hash: string;
+}): Promise<boolean> {
+  return bcrypt.compare(password, hash);
 }

@@ -1,9 +1,16 @@
-import { createHash } from "node:crypto";
 import type { UploadApiResponse } from "cloudinary";
 import { v2 as cloudinary } from "cloudinary";
 
 import env from "~/env";
+import { assertBufferMatchesAllowedUpload } from "~/lib/file-content-validation";
 import logger from "~/lib/logger";
+import { scanUploadBuffer } from "~/lib/malware-scan";
+import {
+  OBJECT_STORAGE_MAX_BYTES_LABEL,
+  buildBoundUploadParams,
+  OBJECT_STORAGE_ENCRYPTION_CONTEXT,
+  uploadContextIncludesEncryptionPolicy,
+} from "~/lib/object-storage-policy";
 import { HttpError } from "~/middlewares/error-handler";
 
 export type CloudinaryResourceType = "image" | "video" | "raw" | "auto";
@@ -24,6 +31,19 @@ export type UploadedFile = {
   width: number | null;
   height: number | null;
   originalFilename: string;
+};
+
+export type PresignedCloudinaryUpload = {
+  cloudName: string;
+  apiKey: string;
+  timestamp: number;
+  signature: string;
+  folder: string;
+  allowedFormats: string;
+  maxFileSize: number;
+  resourceType: CloudinaryResourceType;
+  uploadUrl: string;
+  context: string;
 };
 
 export function isCloudinaryConfigured(): boolean {
@@ -75,6 +95,7 @@ function applyCloudinaryConfig() {
     api_key: credentials.api_key,
     api_secret: credentials.api_secret,
     secure: true,
+    signature_algorithm: "sha256",
   });
   return credentials;
 }
@@ -121,7 +142,10 @@ function toCloudinaryError(error: unknown): HttpError {
     message.toLowerCase().includes("too large") ||
     message.toLowerCase().includes("max file size")
   ) {
-    return new HttpError("File size exceeds the 10MB limit.", 400);
+    return new HttpError(
+      `File size exceeds the ${OBJECT_STORAGE_MAX_BYTES_LABEL} limit.`,
+      400,
+    );
   }
 
   const httpCode =
@@ -139,18 +163,23 @@ function signUploadParams(
   params: Record<string, string | number>,
   apiSecret: string,
 ) {
-  const toSign = Object.keys(params)
-    .filter(
-      (key) =>
-        params[key] !== undefined &&
-        params[key] !== null &&
-        params[key] !== "",
-    )
-    .sort()
-    .map((key) => `${key}=${params[key]}`)
-    .join("&");
+  return cloudinary.utils.api_sign_request(params, apiSecret);
+}
 
-  return createHash("sha1").update(`${toSign}${apiSecret}`).digest("hex");
+function assertEncryptedUploadResponse(payload: UploadApiResponse) {
+  if (!payload.secure_url?.startsWith("https://")) {
+    throw new HttpError(
+      "Uploaded object is not available over HTTPS.",
+      500,
+    );
+  }
+
+  if (!uploadContextIncludesEncryptionPolicy(payload.context)) {
+    logger.warn(
+      "[cloudinary] upload missing encryption context tag for public_id=%s",
+      payload.public_id,
+    );
+  }
 }
 
 export function toUploadedFile(
@@ -174,40 +203,84 @@ export function toUploadedFile(
   };
 }
 
+export function createPresignedUpload(options: {
+  folder: string;
+  mimeType: string;
+  contentLength: number;
+  filename?: string;
+}): PresignedCloudinaryUpload {
+  const credentials = applyCloudinaryConfig();
+  const { params, resourceType, timestamp, allowedFormats } =
+    buildBoundUploadParams(options);
+  const signature = signUploadParams(params, credentials.api_secret);
+  const context = String(params.context);
+
+  return {
+    cloudName: credentials.cloud_name,
+    apiKey: credentials.api_key,
+    timestamp,
+    signature,
+    folder: options.folder,
+    allowedFormats,
+    maxFileSize: options.contentLength,
+    resourceType,
+    context,
+    uploadUrl: `https://api.cloudinary.com/v1_1/${credentials.cloud_name}/${resourceType}/upload`,
+  };
+}
+
 /**
- * Upload via Cloudinary's REST API with an explicit signature.
- * Avoids the Node SDK upload_stream path, which is unreliable under Bun
- * and can cause intermittent "unsigned upload" failures (especially PNGs).
+ * Upload via Cloudinary's REST API with a SHA-256 signature that binds
+ * allowed_formats (content type) and max_file_size (content length).
  */
+export async function fetchCloudinaryObjectSample(
+  secureUrl: string,
+  totalBytes: number,
+  sampleBytes = 8192,
+): Promise<Buffer> {
+  const length = Math.min(Math.max(totalBytes, 1), sampleBytes);
+
+  const response = await fetch(secureUrl, {
+    headers: { Range: `bytes=0-${length - 1}` },
+  });
+
+  if (!response.ok && response.status !== 206) {
+    throw new HttpError("Failed to read uploaded object for validation", 502);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
+
 export async function uploadBuffer(
   buffer: Buffer,
   options: {
     folder: string;
-    resource_type?: CloudinaryResourceType;
-    public_id?: string;
+    mimeType: string;
     filename?: string;
-    mimeType?: string;
+    resource_type?: CloudinaryResourceType;
   },
 ): Promise<UploadApiResponse> {
   const credentials = applyCloudinaryConfig();
-  const resourceType =
+  const { mimeType } = assertBufferMatchesAllowedUpload(
+    buffer,
+    options.mimeType,
+    options.filename,
+  );
+  await scanUploadBuffer(buffer, mimeType, options.filename);
+
+  const contentLength = buffer.byteLength;
+  const { params, resourceType } = buildBoundUploadParams({
+    folder: options.folder,
+    mimeType,
+    contentLength,
+    filename: options.filename,
+  });
+  const resolvedResourceType =
     options.resource_type && options.resource_type !== "auto"
       ? options.resource_type
-      : "image";
-  const timestamp = Math.round(Date.now() / 1000);
+      : resourceType;
 
-  const signedParams: Record<string, string | number> = {
-    folder: options.folder,
-    timestamp,
-    unique_filename: "true",
-    use_filename: "true",
-  };
-
-  if (options.public_id) {
-    signedParams.public_id = options.public_id;
-  }
-
-  const signature = signUploadParams(signedParams, credentials.api_secret);
+  const signature = signUploadParams(params, credentials.api_secret);
 
   const form = new FormData();
   const blob = new Blob([new Uint8Array(buffer)], {
@@ -215,16 +288,16 @@ export async function uploadBuffer(
   });
   form.append("file", blob, options.filename || "upload");
   form.append("api_key", credentials.api_key);
-  form.append("timestamp", String(timestamp));
+  form.append("timestamp", String(params.timestamp));
   form.append("signature", signature);
-  form.append("folder", options.folder);
-  form.append("unique_filename", "true");
-  form.append("use_filename", "true");
-  if (options.public_id) {
-    form.append("public_id", options.public_id);
-  }
+  form.append("folder", String(params.folder));
+  form.append("allowed_formats", String(params.allowed_formats));
+  form.append("max_file_size", String(params.max_file_size));
+  form.append("unique_filename", String(params.unique_filename));
+  form.append("use_filename", String(params.use_filename));
+  form.append("context", String(params.context));
 
-  const endpoint = `https://api.cloudinary.com/v1_1/${credentials.cloud_name}/${resourceType}/upload`;
+  const endpoint = `https://api.cloudinary.com/v1_1/${credentials.cloud_name}/${resolvedResourceType}/upload`;
 
   let response: Response;
   try {
@@ -248,12 +321,56 @@ export async function uploadBuffer(
       status: response.status,
       bytes: buffer.byteLength,
       folder: options.folder,
-      resourceType,
+      resourceType: resolvedResourceType,
     });
     throw toCloudinaryError({ message, http_code: response.status });
   }
 
+  assertEncryptedUploadResponse(payload);
   return payload;
+}
+
+export async function getCloudinaryResource(
+  publicId: string,
+  resourceType: CloudinaryResourceType = "image",
+) {
+  applyCloudinaryConfig();
+
+  return cloudinary.api.resource(publicId, {
+    resource_type: resourceType === "auto" ? "image" : resourceType,
+  });
+}
+
+export async function assertEncryptedStoredObject(
+  publicId: string,
+  resourceType: CloudinaryResourceType,
+  expectedBytes?: number,
+) {
+  const resource = await getCloudinaryResource(publicId, resourceType);
+
+  if (!resource.secure_url?.startsWith("https://")) {
+    throw new HttpError("Stored object is not served over HTTPS.", 500);
+  }
+
+  if (
+    expectedBytes !== undefined &&
+    typeof resource.bytes === "number" &&
+    resource.bytes > expectedBytes
+  ) {
+    throw new HttpError(
+      "Stored object exceeds the signed content length.",
+      400,
+    );
+  }
+
+  if (!uploadContextIncludesEncryptionPolicy(resource.context)) {
+    throw new HttpError(
+      "Stored object is missing the required encryption-at-rest policy tag.",
+      500,
+    );
+  }
+
+  return resource;
 }
 
 export async function deleteCloudinaryFile(
@@ -293,5 +410,8 @@ export async function listCloudinaryFiles(prefix: string) {
     height?: number;
     created_at: string;
     original_filename?: string;
+    context?: unknown;
   }>;
 }
+
+export { OBJECT_STORAGE_ENCRYPTION_CONTEXT };

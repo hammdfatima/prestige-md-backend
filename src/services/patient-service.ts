@@ -1,12 +1,23 @@
 import { randomBytes } from "node:crypto";
 import { status as HttpStatus } from "http-status";
 import { UserRole, UserStatus, type Patient } from "~/generated/prisma/client";
+import { hasTeamPermission } from "~/lib/permissions";
 import prisma from "~/lib/db";
+import { patientInclude } from "~/lib/patient-include";
+import { assertOptionalCallerOwnsObjectKey } from "~/lib/object-key-ownership";
+import { recordMatchesSearch } from "~/lib/encrypted-search";
+import { patientEmailWhere } from "~/lib/encryption-queries";
 import { HttpError } from "~/middlewares/error-handler";
 import type {
   CreatePatientBody,
   ListPatientsQuery,
 } from "~/schemas/patient-schemas";
+import {
+  getPatientRecordForFacilityStaff,
+  getPatientRecordForProvider,
+  listPatientIdsForProvider,
+} from "~/services/care-relationship";
+import { assertStepUpToken } from "~/services/step-up-auth-service";
 import type { TokenPayload } from "~/types";
 
 type PatientRecord = Patient & {
@@ -17,21 +28,11 @@ type PatientRecord = Patient & {
     lastName: string;
     avatarUrl: string | null;
   } | null;
+  deletionRequestedAt?: Date | null;
+  anonymizedAt?: Date | null;
 };
 
-const patientInclude = {
-  facility: { select: { id: true, name: true } },
-  createdBy: {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      avatarUrl: true,
-    },
-  },
-} as const;
-
-export { patientInclude };
+export { patientInclude } from "~/lib/patient-include";
 
 function splitName(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -39,10 +40,6 @@ function splitName(name: string) {
     firstName: parts[0] ?? name.trim(),
     lastName: parts.slice(1).join(" ") || parts[0] || name.trim(),
   };
-}
-
-function dateOnly(value: Date) {
-  return value.toISOString().slice(0, 10);
 }
 
 function parseDateOnly(value: string) {
@@ -76,7 +73,7 @@ async function getFacilityOrThrow(facilityId: string) {
   return facility;
 }
 
-function toPatientWriteData(input: CreatePatientBody) {
+function toPatientWriteData(input: CreatePatientBody, auth: TokenPayload) {
   const { firstName, lastName } = splitName(input.name);
   const avatarUrl = input.avatarUrl.trim();
 
@@ -87,12 +84,18 @@ function toPatientWriteData(input: CreatePatientBody) {
     );
   }
 
+  assertOptionalCallerOwnsObjectKey(auth, input.avatarPublicId);
+
+  parseDateOnly(input.dateOfBirth);
+  parseDateOnly(input.insuranceEffectiveDate);
+  parseDateOnly(input.examinationDate);
+
   return {
     firstName,
     lastName,
     email: input.email?.trim().toLowerCase() || null,
     phone: input.phone.trim(),
-    dateOfBirth: parseDateOnly(input.dateOfBirth),
+    dateOfBirth: input.dateOfBirth,
     avatarUrl,
     avatarPublicId: input.avatarPublicId?.trim() || null,
     authorizedRepresentative: input.authorizedRepresentative?.trim() || null,
@@ -110,7 +113,7 @@ function toPatientWriteData(input: CreatePatientBody) {
     insuranceSubscriberName: input.insuranceSubscriberName.trim(),
     insuranceSubscriberRelationship:
       input.insuranceSubscriberRelationship.trim(),
-    insuranceEffectiveDate: parseDateOnly(input.insuranceEffectiveDate),
+    insuranceEffectiveDate: input.insuranceEffectiveDate,
     insurancePhone: input.insurancePhone.trim(),
     knownAllergies: input.knownAllergies.trim(),
     medicalHistory: input.medicalHistory.trim(),
@@ -145,7 +148,7 @@ function toPatientWriteData(input: CreatePatientBody) {
     examinerTitle: input.examinerTitle,
     examinerPhone: input.examinerPhone.trim(),
     examinerAddress: input.examinerAddress.trim(),
-    examinationDate: parseDateOnly(input.examinationDate),
+    examinationDate: input.examinationDate,
   };
 }
 
@@ -158,7 +161,7 @@ export function publicPatient(patient: PatientRecord) {
     name: `${patient.firstName} ${patient.lastName}`.trim(),
     email: patient.email,
     phone: patient.phone,
-    dateOfBirth: dateOnly(patient.dateOfBirth),
+    dateOfBirth: patient.dateOfBirth,
     avatarUrl: patient.avatarUrl,
     avatarPublicId: patient.avatarPublicId,
     authorizedRepresentative: patient.authorizedRepresentative,
@@ -178,7 +181,7 @@ export function publicPatient(patient: PatientRecord) {
       groupNumber: patient.insuranceGroupNumber,
       subscriberName: patient.insuranceSubscriberName,
       subscriberRelationship: patient.insuranceSubscriberRelationship,
-      effectiveDate: dateOnly(patient.insuranceEffectiveDate),
+      effectiveDate: patient.insuranceEffectiveDate,
       phone: patient.insurancePhone,
     },
     facilityId: patient.facilityId,
@@ -224,8 +227,10 @@ export function publicPatient(patient: PatientRecord) {
     examinerTitle: patient.examinerTitle,
     examinerPhone: patient.examinerPhone,
     examinerAddress: patient.examinerAddress,
-    examinationDate: dateOnly(patient.examinationDate),
+    examinationDate: patient.examinationDate,
     nurseNotes: patient.nurseNotes,
+    deletionRequestedAt: patient.deletionRequestedAt?.toISOString() ?? null,
+    anonymizedAt: patient.anonymizedAt?.toISOString() ?? null,
     createdAt: patient.createdAt.toISOString(),
     updatedAt: patient.updatedAt.toISOString(),
   };
@@ -233,14 +238,14 @@ export function publicPatient(patient: PatientRecord) {
 
 export async function createPatient(
   input: CreatePatientBody,
-  createdByUserId?: string,
+  auth: TokenPayload,
 ) {
-  const writeData = toPatientWriteData(input);
+  const writeData = toPatientWriteData(input, auth);
   const facility = await getFacilityOrThrow(input.facilityId);
 
   if (writeData.email) {
     const existing = await prisma.patient.findFirst({
-      where: { email: writeData.email },
+      where: patientEmailWhere(writeData.email),
     });
     if (existing) {
       throw new HttpError(
@@ -250,16 +255,11 @@ export async function createPatient(
     }
   }
 
-  let createdBy: { connect: { id: string } } | undefined;
-  if (createdByUserId) {
-    const creator = await prisma.user.findUnique({
-      where: { id: createdByUserId },
-      select: { id: true },
-    });
-    if (creator) {
-      createdBy = { connect: { id: creator.id } };
-    }
-  }
+  const creator = await prisma.user.findUnique({
+    where: { id: auth.id },
+    select: { id: true },
+  });
+  const createdBy = creator ? { connect: { id: creator.id } } : undefined;
 
   let patient: PatientRecord | null = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -301,23 +301,24 @@ export async function listPatients(query: ListPatientsQuery) {
     where: {
       status: query.status,
       facilityId: query.facilityId,
-      ...(search
-        ? {
-            OR: [
-              { firstName: { contains: search, mode: "insensitive" } },
-              { lastName: { contains: search, mode: "insensitive" } },
-              { email: { contains: search, mode: "insensitive" } },
-              { phone: { contains: search, mode: "insensitive" } },
-              { memberId: { contains: search, mode: "insensitive" } },
-            ],
-          }
-        : {}),
     },
     include: patientInclude,
     orderBy: { createdAt: "desc" },
   });
 
-  return patients.map(publicPatient);
+  const filtered = search
+    ? patients.filter((patient) =>
+        recordMatchesSearch(patient, search, [
+          "firstName",
+          "lastName",
+          "email",
+          "phone",
+          "memberId",
+        ]),
+      )
+    : patients;
+
+  return filtered.map(publicPatient);
 }
 
 export async function getPatient(id: string) {
@@ -333,6 +334,20 @@ export async function getPatient(id: string) {
   return publicPatient(patient);
 }
 
+/** Admin/staff patient lookup — not for clinical roles; use getPatientForViewer instead. */
+async function getPatientRecord(id: string) {
+  const patient = await prisma.patient.findUnique({
+    where: { id },
+    include: patientInclude,
+  });
+
+  if (!patient) {
+    throw new HttpError("Patient not found", HttpStatus.NOT_FOUND);
+  }
+
+  return patient;
+}
+
 function assertCanReadPatients(auth: TokenPayload) {
   if (
     auth.role === UserRole.ADMIN ||
@@ -343,10 +358,7 @@ function assertCanReadPatients(auth: TokenPayload) {
     return;
   }
 
-  if (
-    auth.role === UserRole.TEAM_MEMBER &&
-    (auth.permissions ?? []).includes("manage_patients")
-  ) {
+  if (hasTeamPermission(auth, "manage_patients")) {
     return;
   }
 
@@ -369,36 +381,34 @@ export async function listPatientsForViewer(
   assertCanReadPatients(auth);
 
   if (auth.role === UserRole.DOCTOR) {
-    const visits = await prisma.visit.findMany({
-      where: { providerId: auth.id },
-      select: { patientId: true },
-      distinct: ["patientId"],
-    });
-    const patientIds = visits.map((visit) => visit.patientId);
+    const patientIds = await listPatientIdsForProvider(auth.id);
     if (patientIds.length === 0) {
       return [];
     }
 
+    const search = query.search?.trim();
+
     const patients = await prisma.patient.findMany({
       where: {
         id: { in: patientIds },
-        ...(query.search
-          ? {
-              OR: [
-                { firstName: { contains: query.search, mode: "insensitive" } },
-                { lastName: { contains: query.search, mode: "insensitive" } },
-                { memberId: { contains: query.search, mode: "insensitive" } },
-                { email: { contains: query.search, mode: "insensitive" } },
-              ],
-            }
-          : {}),
         ...(query.status ? { status: query.status } : {}),
       },
       include: patientInclude,
       orderBy: { updatedAt: "desc" },
     });
 
-    return patients.map((patient) => publicPatient(patient));
+    const filtered = search
+      ? patients.filter((patient) =>
+          recordMatchesSearch(patient, search, [
+            "firstName",
+            "lastName",
+            "memberId",
+            "email",
+          ]),
+        )
+      : patients;
+
+    return filtered.map((patient) => publicPatient(patient));
   }
 
   if (isFacilityScopedReader(auth)) {
@@ -415,29 +425,38 @@ export async function getPatientForViewer(auth: TokenPayload, id: string) {
   assertCanReadPatients(auth);
 
   if (auth.role === UserRole.DOCTOR) {
-    const visit = await prisma.visit.findFirst({
-      where: { patientId: id, providerId: auth.id },
-      select: { id: true },
-    });
-    if (!visit) {
+    const patient = await getPatientRecordForProvider(auth.id, id);
+    return publicPatient(patient);
+  }
+
+  if (isFacilityScopedReader(auth)) {
+    if (!auth.facilityId) {
       throw new HttpError("Patient not found", HttpStatus.NOT_FOUND);
     }
-    return getPatient(id);
+    const patient = await getPatientRecordForFacilityStaff(
+      auth.facilityId,
+      id,
+    );
+    return publicPatient(patient);
   }
 
-  const patient = await getPatient(id);
-
-  if (
-    isFacilityScopedReader(auth) &&
-    patient.facilityId !== auth.facilityId
-  ) {
-    throw new HttpError("Patient not found", HttpStatus.NOT_FOUND);
-  }
-
-  return patient;
+  const patient = await getPatientRecord(id);
+  return publicPatient(patient);
 }
 
-export async function updatePatient(id: string, input: CreatePatientBody) {
+/** §16.2 object-level check — throws 404 when patient is out of scope. */
+export async function assertPatientAccessForViewer(
+  auth: TokenPayload,
+  patientId: string,
+) {
+  await getPatientForViewer(auth, patientId);
+}
+
+export async function updatePatient(
+  id: string,
+  input: CreatePatientBody,
+  auth: TokenPayload,
+) {
   const existing = await prisma.patient.findUnique({
     where: { id },
     select: { id: true },
@@ -447,12 +466,15 @@ export async function updatePatient(id: string, input: CreatePatientBody) {
     throw new HttpError("Patient not found", HttpStatus.NOT_FOUND);
   }
 
-  const writeData = toPatientWriteData(input);
+  const writeData = toPatientWriteData(input, auth);
   const facility = await getFacilityOrThrow(input.facilityId);
 
   if (writeData.email) {
     const duplicate = await prisma.patient.findFirst({
-      where: { email: writeData.email, NOT: { id } },
+      where: {
+        ...patientEmailWhere(writeData.email),
+        NOT: { id },
+      },
     });
     if (duplicate) {
       throw new HttpError(
@@ -474,16 +496,62 @@ export async function updatePatient(id: string, input: CreatePatientBody) {
   return publicPatient(patient);
 }
 
-export async function deletePatient(id: string) {
+/** HIPAA §6.2 staged patient deletion — admin request; retention job anonymizes then purges. */
+export async function requestPatientDeletion(
+  auth: TokenPayload,
+  id: string,
+  stepUpToken: string,
+) {
+  assertStepUpToken(auth, stepUpToken);
+
   const existing = await prisma.patient.findUnique({
     where: { id },
-    select: { id: true },
+    select: {
+      id: true,
+      deletionRequestedAt: true,
+      anonymizedAt: true,
+    },
   });
 
   if (!existing) {
     throw new HttpError("Patient not found", HttpStatus.NOT_FOUND);
   }
 
-  await prisma.patient.delete({ where: { id } });
-  return { id };
+  if (existing.deletionRequestedAt) {
+    throw new HttpError(
+      "A deletion request is already on file for this patient",
+      HttpStatus.CONFLICT,
+    );
+  }
+
+  const patient = await prisma.patient.update({
+    where: { id },
+    data: {
+      deletionRequestedAt: new Date(),
+      deletionRequestedByUserId: auth.id,
+      status: UserStatus.INACTIVE,
+    },
+    include: patientInclude,
+  });
+
+  return publicPatient(patient);
+}
+
+export async function exportPatientsForViewer(
+  auth: TokenPayload,
+  stepUpToken: string,
+) {
+  assertStepUpToken(auth, stepUpToken);
+  assertCanReadPatients(auth);
+
+  const patients = await listPatientsForViewer(auth, {});
+  return patients.map((patient) => ({
+    id: patient.id,
+    memberId: patient.memberId,
+    name: patient.name,
+    email: patient.email,
+    phone: patient.phone,
+    facilityName: patient.facilityName,
+    status: patient.status,
+  }));
 }
