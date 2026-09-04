@@ -90,6 +90,11 @@ function dateToIsoDay(value: unknown) {
     return value.toISOString().slice(0, 10);
   }
   if (typeof value === "string") {
+    // Never slice ciphertext — enc:v1:/enc:v2: values are longer than ISO dates
+    // and slicing to 10 chars permanently destroys the payload.
+    if (isEncryptedValue(value)) {
+      return value;
+    }
     return value.slice(0, 10);
   }
   return String(value ?? "");

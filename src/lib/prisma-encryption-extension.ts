@@ -137,6 +137,15 @@ function transformWhereValue(model: string, where: unknown): unknown {
   return next;
 }
 
+function isPlainObject(value: unknown): value is PlainObject {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
 function decryptDeep(value: unknown, model?: EncryptedPrismaModel): unknown {
   if (value == null) {
     return value;
@@ -146,17 +155,29 @@ function decryptDeep(value: unknown, model?: EncryptedPrismaModel): unknown {
     return value.map((entry) => decryptDeep(entry, model));
   }
 
-  if (typeof value !== "object") {
+  if (!isPlainObject(value)) {
     return value;
   }
 
-  const record = value as PlainObject;
+  const record = value;
   const decrypted = model ? decryptData(model, record) : { ...record };
 
   for (const [key, nested] of Object.entries(record)) {
+    if (nested == null || typeof nested !== "object") {
+      continue;
+    }
+
     const nestedModel = RELATION_MODEL_MAP[key];
-    if (nestedModel && nested != null) {
+    if (nestedModel) {
+      // Known encrypted relation (e.g. user.facility, visit.patient)
       decrypted[key] = decryptDeep(nested, nestedModel);
+      continue;
+    }
+
+    // Join-table / intermediate containers (e.g. facilityLinks[]) still
+    // contain nested encrypted models further down — keep walking.
+    if (Array.isArray(nested) || isPlainObject(nested)) {
+      decrypted[key] = decryptDeep(nested, undefined);
     }
   }
 
