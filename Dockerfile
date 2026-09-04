@@ -1,31 +1,44 @@
-# Development image for Revive Mind backend (Express + Prisma).
-# Runs nodemon / ts-node — not a compiled production start.
-# Provide env on the instance via `backend.env` (loaded by src/env.ts).
+# Production image for Prestige MD backend (Express + Prisma).
 
-FROM node:22-alpine
-
+FROM node:22-alpine AS deps
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
-
 RUN npm install -g pnpm@10
-
 COPY package.json pnpm-lock.yaml ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
-
 # Prisma postinstall needs DATABASE_URL to load prisma.config.ts.
-# Pass only for install/generate — do not bake into the image ENV.
-ARG PRISMA_BUILD_DATABASE_URL="postgresql://build:build@127.0.0.1:5432/revive_mind_build"
-
+ARG PRISMA_BUILD_DATABASE_URL="postgresql://build:build@127.0.0.1:5432/prestige_md_build"
 RUN DATABASE_URL="$PRISMA_BUILD_DATABASE_URL" pnpm install --frozen-lockfile
 
+FROM node:22-alpine AS builder
+RUN apk add --no-cache libc6-compat openssl
+WORKDIR /app
+RUN npm install -g pnpm@10
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-
+ARG PRISMA_BUILD_DATABASE_URL="postgresql://build:build@127.0.0.1:5432/prestige_md_build"
 RUN DATABASE_URL="$PRISMA_BUILD_DATABASE_URL" pnpm exec prisma generate
+RUN DATABASE_URL="$PRISMA_BUILD_DATABASE_URL" pnpm run build
 
-ENV NODE_ENV=development
+FROM node:22-alpine AS runner
+RUN apk add --no-cache libc6-compat openssl
+WORKDIR /app
+
+ENV NODE_ENV=production
 ENV PORT_NO=5000
 
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 expressjs
+
+COPY --from=builder --chown=expressjs:nodejs /app/dist ./dist
+COPY --from=builder --chown=expressjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=expressjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=expressjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=expressjs:nodejs /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder --chown=expressjs:nodejs /app/src/generated ./src/generated
+
+USER expressjs
 EXPOSE 5000
 
-CMD ["pnpm", "run", "dev"]
+CMD ["node", "dist/server.js"]

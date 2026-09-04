@@ -22,17 +22,18 @@ function rateLimitHandler(message: string) {
 }
 
 let redisClient: Redis | null = null;
-let rateLimitStore: Store | undefined;
+let redisStoreReadyLogged = false;
 
-function getRateLimitStore(): Store | undefined {
+function getRedisClient(): Redis | null {
   if (!env.REDIS_URL) {
-    return undefined;
+    return null;
   }
 
-  if (!rateLimitStore) {
+  if (!redisClient) {
     redisClient = new Redis(env.REDIS_URL, {
-      maxRetriesPerRequest: 1,
-      enableOfflineQueue: false,
+      maxRetriesPerRequest: 3,
+      enableOfflineQueue: true,
+      lazyConnect: false,
     });
 
     redisClient.on("error", (error) => {
@@ -40,25 +41,47 @@ function getRateLimitStore(): Store | undefined {
       logger.error(error);
     });
 
-    rateLimitStore = new RedisStore({
-      sendCommand: (command: string, ...args: string[]) =>
-        redisClient!.call(command, ...args) as Promise<RedisReply>,
+    redisClient.on("connect", () => {
+      logger.info("Redis rate-limit client connected");
     });
-
-    logger.info("Rate limiting will use the Redis store.");
   }
 
-  return rateLimitStore;
+  return redisClient;
+}
+
+/**
+ * express-rate-limit forbids sharing one Store across limiters.
+ * Share the Redis client, but create a dedicated RedisStore + unique prefix per limiter.
+ */
+function createRedisStore(prefix: string): Store | undefined {
+  const client = getRedisClient();
+  if (!client) {
+    return undefined;
+  }
+
+  if (!redisStoreReadyLogged) {
+    logger.info("Rate limiting will use the Redis store.");
+    redisStoreReadyLogged = true;
+  }
+
+  return new RedisStore({
+    prefix: `rl:${prefix}:`,
+    sendCommand: (command: string, ...args: string[]) =>
+      client.call(command, ...args) as Promise<RedisReply>,
+  });
 }
 
 function createLimiterOptions(
   message: string,
+  storePrefix: string,
   overrides: Partial<Options> = {},
 ): Partial<Options> {
-  const store = getRateLimitStore();
+  const store = createRedisStore(storePrefix);
 
   if (!store) {
-    logger.warn("REDIS_URL is not set; rate limiting will use the in-memory store.");
+    logger.warn(
+      `REDIS_URL is not set; "${storePrefix}" rate limiting will use the in-memory store.`,
+    );
   }
 
   return {
@@ -75,12 +98,14 @@ function createLimiterOptions(
 export const limiter = rateLimit(
   createLimiterOptions(
     "Too many requests from this IP, please try again later.",
+    "global",
   ),
 );
 
 export const authLoginLimiter = rateLimit(
   createLimiterOptions(
     "Too many login attempts from this IP, please try again later.",
+    "auth-login",
     { max: 30 },
   ),
 );
@@ -88,6 +113,7 @@ export const authLoginLimiter = rateLimit(
 export const patientExportLimiter = rateLimit(
   createLimiterOptions(
     "Too many patient export requests. Try again later.",
+    "patient-export",
     { windowMs: 60 * 60 * 1000, max: 5 },
   ),
 );

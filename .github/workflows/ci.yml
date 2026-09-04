@@ -1,6 +1,6 @@
-name: Development CI/CD
+name: Production CI/CD
 
-# Development — builds and publishes the backend image to ECR.
+# Builds a production backend image and publishes it to ECR.
 # App env vars live on the instance in `backend.env` (not GitHub secrets).
 
 on:
@@ -31,7 +31,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push development image to ECR
+      - name: Build and push production image to ECR
         uses: docker/build-push-action@v6
         with:
           context: .
