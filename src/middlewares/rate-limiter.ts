@@ -31,9 +31,17 @@ function getRedisClient(): Redis | null {
 
   if (!redisClient) {
     redisClient = new Redis(env.REDIS_URL, {
-      maxRetriesPerRequest: 3,
+      // Prevent MaxRetriesPerRequestError from crashing the Node process when Redis is down.
+      maxRetriesPerRequest: null,
       enableOfflineQueue: true,
-      lazyConnect: false,
+      retryStrategy(times) {
+        if (times === 1 || times % 20 === 0) {
+          logger.warn(
+            `Redis unreachable (attempt ${times}); rate-limit commands will retry. Fix REDIS_URL or clear it to use in-memory limits.`,
+          );
+        }
+        return Math.min(times * 500, 5_000);
+      },
     });
 
     redisClient.on("error", (error) => {
