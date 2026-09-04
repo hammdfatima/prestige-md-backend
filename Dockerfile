@@ -19,7 +19,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ARG PRISMA_BUILD_DATABASE_URL="postgresql://build:build@127.0.0.1:5432/prestige_md_build"
 RUN DATABASE_URL="$PRISMA_BUILD_DATABASE_URL" pnpm exec prisma generate
-RUN DATABASE_URL="$PRISMA_BUILD_DATABASE_URL" pnpm run build
+RUN pnpm run build:docker
 
 FROM node:22-alpine AS runner
 RUN apk add --no-cache libc6-compat openssl

@@ -3,7 +3,6 @@ import prisma from "~/lib/db";
 import { issueSessionToken } from "~/lib/session-token";
 import {
   revokeAccountSession,
-  revokeOtherAccountSessions,
   touchAccountSession,
 } from "~/services/account-session-service";
 import type { TokenPayload } from "~/types";

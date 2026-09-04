@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "nodemon",
     "build": "prisma generate && npx @biomejs/biome lint ./src && tsc -p tsconfig.json && tsc-alias",
+    "build:docker": "tsc -p tsconfig.json && tsc-alias",
     "lint": "npx @biomejs/biome lint ./src",
     "start": "node dist/server.js",
     "encrypt:backfill": "ts-node -r tsconfig-paths/register scripts/backfill-field-encryption.ts",
