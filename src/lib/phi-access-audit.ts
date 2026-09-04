@@ -1,7 +1,6 @@
 /** HIPAA §3.3 PHI access audit — resource IDs only, never PHI in audit payloads. */
 import { UserRole } from "~/generated/prisma/client";
 import prisma from "~/lib/db";
-import logger from "~/lib/logger";
 import {
   formatAuditTargetResource,
   recordSecurityAuditEvent,
@@ -13,6 +12,13 @@ import type { TokenPayload } from "~/types";
 
 /** Resource IDs and action types only — never patient names, diagnoses, or message bodies. */
 const PHI_SAFE_TARGET_PATTERN = /^[a-z_]+:[a-zA-Z0-9_./-]+$/;
+
+type ListAuditFilters = {
+  hasSearch?: boolean;
+  hasStatusFilter?: boolean;
+  hasFacilityFilter?: boolean;
+  hasPatientFilter?: boolean;
+};
 
 async function resolveActorEmail(auth: TokenPayload): Promise<string> {
   if (auth.role === UserRole.FACILITY_MANAGER) {
@@ -39,6 +45,26 @@ function assertPhiSafeTargetResource(targetResource: string) {
   }
 }
 
+function formatListAuditTarget(
+  listType: "patient_list" | "visit_list",
+  resultCount: number,
+  filters: ListAuditFilters,
+) {
+  const parts = [
+    `count_${resultCount}`,
+    filters.hasSearch ? "search_yes" : "search_no",
+  ];
+
+  if (listType === "patient_list") {
+    parts.push(filters.hasStatusFilter ? "status_yes" : "status_no");
+    parts.push(filters.hasFacilityFilter ? "facility_yes" : "facility_no");
+  } else {
+    parts.push(filters.hasPatientFilter ? "patient_yes" : "patient_no");
+  }
+
+  return formatAuditTargetResource(listType, parts.join("_"));
+}
+
 export async function recordPhiAccessAudit(input: {
   auth: TokenPayload;
   eventType: SecurityAuditEventType;
@@ -49,40 +75,86 @@ export async function recordPhiAccessAudit(input: {
 
   const actorEmail = await resolveActorEmail(input.auth);
 
-  await recordSecurityAuditEvent({
-    eventType: input.eventType,
-    actorId: input.auth.id,
-    actorRole: input.auth.role,
-    actorEmail,
-    targetResource: input.targetResource,
-    context: input.context,
-  });
+  await recordSecurityAuditEvent(
+    {
+      eventType: input.eventType,
+      actorId: input.auth.id,
+      actorRole: input.auth.role,
+      actorEmail,
+      targetResource: input.targetResource,
+      context: input.context,
+    },
+    { required: true },
+  );
+
+  if (input.auth.role === UserRole.ADMIN) {
+    const adminTarget = `${input.eventType}_${input.targetResource.replace(/[/:]/g, "_")}`;
+    await recordSecurityAuditEvent(
+      {
+        eventType: SECURITY_AUDIT_EVENTS.ADMIN_PRIVILEGED_ACCESS,
+        actorId: input.auth.id,
+        actorRole: input.auth.role,
+        actorEmail,
+        targetResource: formatAuditTargetResource(
+          "admin_privileged",
+          adminTarget,
+        ),
+        context: input.context,
+      },
+      { required: true },
+    );
+  }
 }
 
-function logPhiAccess(
+async function recordPhiAccess(
   auth: TokenPayload,
   eventType: SecurityAuditEventType,
   targetType: string,
   targetId: string,
   context?: AuditRequestContext,
 ) {
-  void recordPhiAccessAudit({
+  await recordPhiAccessAudit({
     auth,
     eventType,
     targetResource: formatAuditTargetResource(targetType, targetId),
     context,
-  }).catch((error) => {
-    logger.error(`Failed to record PHI access audit event ${eventType}`);
-    logger.error(error);
   });
 }
 
-export function recordPatientRecordViewed(
+export async function recordPatientListViewed(
+  auth: TokenPayload,
+  resultCount: number,
+  filters: ListAuditFilters,
+  context?: AuditRequestContext,
+) {
+  await recordPhiAccessAudit({
+    auth,
+    eventType: SECURITY_AUDIT_EVENTS.PATIENT_LIST_VIEWED,
+    targetResource: formatListAuditTarget("patient_list", resultCount, filters),
+    context,
+  });
+}
+
+export async function recordVisitListViewed(
+  auth: TokenPayload,
+  resultCount: number,
+  filters: ListAuditFilters,
+  context?: AuditRequestContext,
+) {
+  await recordPhiAccessAudit({
+    auth,
+    eventType: SECURITY_AUDIT_EVENTS.VISIT_LIST_VIEWED,
+    targetResource: formatListAuditTarget("visit_list", resultCount, filters),
+    context,
+  });
+}
+
+export async function recordPatientRecordViewed(
   auth: TokenPayload,
   patientId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PATIENT_RECORD_VIEWED,
     "patient",
@@ -91,12 +163,12 @@ export function recordPatientRecordViewed(
   );
 }
 
-export function recordPatientRecordUpdated(
+export async function recordPatientRecordUpdated(
   auth: TokenPayload,
   patientId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PATIENT_RECORD_UPDATED,
     "patient",
@@ -105,12 +177,12 @@ export function recordPatientRecordUpdated(
   );
 }
 
-export function recordPatientRecordCreated(
+export async function recordPatientRecordCreated(
   auth: TokenPayload,
   patientId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PATIENT_RECORD_CREATED,
     "patient",
@@ -119,12 +191,12 @@ export function recordPatientRecordCreated(
   );
 }
 
-export function recordPatientRecordDeleted(
+export async function recordPatientRecordDeleted(
   auth: TokenPayload,
   patientId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PATIENT_RECORD_DELETED,
     "patient",
@@ -133,12 +205,12 @@ export function recordPatientRecordDeleted(
   );
 }
 
-export function recordPatientDeletionRequested(
+export async function recordPatientDeletionRequested(
   auth: TokenPayload,
   patientId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PATIENT_DELETION_REQUESTED,
     "patient",
@@ -147,12 +219,12 @@ export function recordPatientDeletionRequested(
   );
 }
 
-export function recordPatientRecordExported(
+export async function recordPatientRecordExported(
   auth: TokenPayload,
   targetId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PATIENT_RECORD_EXPORTED,
     "patient_export",
@@ -161,12 +233,12 @@ export function recordPatientRecordExported(
   );
 }
 
-export function recordPrescriptionViewed(
+export async function recordPrescriptionViewed(
   auth: TokenPayload,
   patientId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PRESCRIPTION_VIEWED,
     "patient",
@@ -175,12 +247,12 @@ export function recordPrescriptionViewed(
   );
 }
 
-export function recordPrescriptionCreated(
+export async function recordPrescriptionCreated(
   auth: TokenPayload,
   prescriptionId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PRESCRIPTION_CREATED,
     "prescription",
@@ -189,12 +261,12 @@ export function recordPrescriptionCreated(
   );
 }
 
-export function recordPrescriptionUpdated(
+export async function recordPrescriptionUpdated(
   auth: TokenPayload,
   prescriptionId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PRESCRIPTION_UPDATED,
     "prescription",
@@ -203,12 +275,12 @@ export function recordPrescriptionUpdated(
   );
 }
 
-export function recordPrescriptionDeleted(
+export async function recordPrescriptionDeleted(
   auth: TokenPayload,
   prescriptionId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.PRESCRIPTION_DELETED,
     "prescription",
@@ -217,12 +289,12 @@ export function recordPrescriptionDeleted(
   );
 }
 
-export function recordClinicalNotesViewed(
+export async function recordClinicalNotesViewed(
   auth: TokenPayload,
   patientId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.CLINICAL_NOTES_VIEWED,
     "patient",
@@ -231,12 +303,12 @@ export function recordClinicalNotesViewed(
   );
 }
 
-export function recordClinicalNotesUpdated(
+export async function recordClinicalNotesUpdated(
   auth: TokenPayload,
   patientId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.CLINICAL_NOTES_UPDATED,
     "patient",
@@ -245,12 +317,12 @@ export function recordClinicalNotesUpdated(
   );
 }
 
-export function recordVisitClinicalNotesUpdated(
+export async function recordVisitClinicalNotesUpdated(
   auth: TokenPayload,
   visitId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.CLINICAL_NOTES_UPDATED,
     "visit",
@@ -259,12 +331,12 @@ export function recordVisitClinicalNotesUpdated(
   );
 }
 
-export function recordMessageAccessed(
+export async function recordMessageAccessed(
   auth: TokenPayload,
   visitId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.MESSAGE_ACCESSED,
     "visit",
@@ -273,12 +345,12 @@ export function recordMessageAccessed(
   );
 }
 
-export function recordMessageSent(
+export async function recordMessageSent(
   auth: TokenPayload,
   messageId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.MESSAGE_SENT,
     "message",
@@ -287,12 +359,12 @@ export function recordMessageSent(
   );
 }
 
-export function recordFileUploaded(
+export async function recordFileUploaded(
   auth: TokenPayload,
   filePublicId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.FILE_UPLOADED,
     "file",
@@ -301,11 +373,11 @@ export function recordFileUploaded(
   );
 }
 
-export function recordFileAccessed(
+export async function recordFileAccessed(
   auth: TokenPayload,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.FILE_ACCESSED,
     "file_library",
@@ -314,12 +386,12 @@ export function recordFileAccessed(
   );
 }
 
-export function recordFileDeleted(
+export async function recordFileDeleted(
   auth: TokenPayload,
   filePublicId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.FILE_DELETED,
     "file",
@@ -328,12 +400,12 @@ export function recordFileDeleted(
   );
 }
 
-export function recordAppointmentViewed(
+export async function recordAppointmentViewed(
   auth: TokenPayload,
   visitId: string,
   context?: AuditRequestContext,
 ) {
-  logPhiAccess(
+  await recordPhiAccess(
     auth,
     SECURITY_AUDIT_EVENTS.APPOINTMENT_VIEWED,
     "visit",
@@ -347,6 +419,8 @@ export function resolveAuditTargetLabel(targetResource: string) {
   switch (type) {
     case "patient":
       return "Patient record";
+    case "patient_list":
+      return "Patient list";
     case "patient_export":
       return "Patient export";
     case "retention_job":
@@ -355,6 +429,8 @@ export function resolveAuditTargetLabel(targetResource: string) {
       return "Prescription";
     case "visit":
       return "Appointment";
+    case "visit_list":
+      return "Visit list";
     case "message":
       return "Message";
     case "file":
@@ -369,6 +445,8 @@ export function resolveAuditTargetLabel(targetResource: string) {
       return "Facility account";
     case "action":
       return "Protected action";
+    case "admin_privileged":
+      return "Admin privileged access";
     default:
       return "Resource";
   }

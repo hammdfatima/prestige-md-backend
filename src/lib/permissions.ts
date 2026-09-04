@@ -25,7 +25,9 @@ const permissionSet = new Set<string>(TEAM_PERMISSIONS);
 
 /**
  * Permission matrix — maps functional areas to required team permissions.
- * ADMIN bypasses all checks. Other roles use role-based route middleware.
+ * ADMIN retains full access to all admin and clinical areas; privileged ADMIN
+ * actions are recorded separately in the audit trail (see ADMIN_PRIVILEGED_ACCESS).
+ * TEAM_MEMBER access is default-deny via hasTeamPermission.
  */
 export const PERMISSION_MATRIX = {
   dashboard: ["view_dashboard"],
@@ -85,7 +87,7 @@ type PermissionSubject = {
   permissions?: string[];
 };
 
-/** Default-deny permission check for TEAM_MEMBER; ADMIN always allowed. */
+/** Default-deny permission check for TEAM_MEMBER; ADMIN always allowed and audited. */
 export function hasTeamPermission(
   subject: PermissionSubject,
   ...anyOf: TeamPermissionId[]

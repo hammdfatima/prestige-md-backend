@@ -8,4 +8,4 @@ export function isMfaEnabled(): boolean {
 
 export const LOGIN_MFA_OTP_TTL_MS = 10 * 60 * 1000;
 export const LOGIN_MFA_MAX_ATTEMPTS = 5;
-export const LOGIN_MFA_CODE_LENGTH = 4;
+export const LOGIN_MFA_CODE_LENGTH = 6;

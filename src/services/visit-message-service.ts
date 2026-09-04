@@ -189,25 +189,10 @@ export async function sendVisitMessage(
       count: unread,
     });
 
-    const senderName =
-      `${message.sender.firstName} ${message.sender.lastName}`.trim() ||
-      "Staff";
-    const patientName =
-      `${visit.patient.firstName} ${visit.patient.lastName}`.trim() ||
-      "patient";
-    const preview = body
-      ? body.slice(0, 120)
-      : message.attachmentFilename
-        ? `Sent an attachment: ${message.attachmentFilename}`
-        : "Sent an attachment";
-
     void notifyVisitMessageInApp({
       recipientId: counterpartId,
       recipientRole: auth.role === UserRole.DOCTOR ? "NURSE" : "DOCTOR",
       visitId,
-      senderName,
-      preview,
-      patientName,
     });
   }
 

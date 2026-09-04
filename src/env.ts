@@ -133,6 +133,22 @@ const EnvSchema = z
           "Do not store plaintext DATA_ENCRYPTION_KEY in production — use AWS_KMS_WRAPPED_DEK",
       });
     }
+
+    if (!data.MFA_ENABLED) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["MFA_ENABLED"],
+        message: "Production must set MFA_ENABLED=true",
+      });
+    }
+
+    if (!data.REDIS_URL?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["REDIS_URL"],
+        message: "REDIS_URL is required in production for distributed rate limiting",
+      });
+    }
   });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -45,6 +45,8 @@ export async function anonymizePatientRecord(patientId: string) {
       lastName: REDACTED,
       email: null,
       emailLookupHash: null,
+      memberId: REDACTED,
+      memberIdLookupHash: null,
       phone: REDACTED,
       avatarUrl: "",
       avatarPublicId: null,

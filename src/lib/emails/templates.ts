@@ -118,13 +118,11 @@ export function buildLoginActivityEmail(input: {
 export function buildVisitBookedEmail(input: {
   toName: string
   toEmail: string
-  patientName: string
-  reason: string
   whenLabel: string
   portalUrl: string
   recipientRole: "doctor" | "nurse"
 }): OutboundEmail {
-  const subject = `Visit booked: ${input.patientName}`
+  const subject = "Visit booked in PrestigeMD"
   const roleLine =
     input.recipientRole === "doctor"
       ? "A visit has been booked for you."
@@ -134,11 +132,10 @@ export function buildVisitBookedEmail(input: {
     `Hi ${input.toName},`,
     "",
     roleLine,
-    `Patient: ${input.patientName}`,
-    `Reason: ${input.reason}`,
     `When: ${input.whenLabel}`,
     "",
-    `Open portal: ${input.portalUrl}`,
+    "Open PrestigeMD to view visit details:",
+    input.portalUrl,
   ].join("\n")
 
   const html = wrapHtml(
@@ -146,11 +143,8 @@ export function buildVisitBookedEmail(input: {
     `
     <p style="margin:0 0 12px">Hi ${escapeHtml(input.toName)},</p>
     <p style="margin:0">${escapeHtml(roleLine)}</p>
-    ${emailDetailList([
-      { label: "Patient", value: input.patientName },
-      { label: "Reason", value: input.reason },
-      { label: "When", value: input.whenLabel },
-    ])}
+    ${emailDetailList([{ label: "When", value: input.whenLabel }])}
+    <p style="margin:16px 0 0;color:#64748b;font-size:13px">Patient and clinical details are available only inside the secure PrestigeMD portal.</p>
     ${emailButton(input.portalUrl, "Open visit in PrestigeMD")}
   `,
   )
@@ -161,21 +155,18 @@ export function buildVisitBookedEmail(input: {
 export function buildVisitReminderEmail(input: {
   toName: string
   toEmail: string
-  patientName: string
-  reason: string
   whenLabel: string
   portalUrl: string
 }): OutboundEmail {
-  const subject = `Reminder: visit with ${input.patientName} soon`
+  const subject = "Reminder: upcoming visit in PrestigeMD"
   const text = [
     `Hi ${input.toName},`,
     "",
     "This is a reminder that a visit is coming up soon.",
-    `Patient: ${input.patientName}`,
-    `Reason: ${input.reason}`,
     `When: ${input.whenLabel}`,
     "",
-    `Open portal: ${input.portalUrl}`,
+    "Open PrestigeMD to view visit details:",
+    input.portalUrl,
   ].join("\n")
 
   const html = wrapHtml(
@@ -183,11 +174,8 @@ export function buildVisitReminderEmail(input: {
     `
     <p style="margin:0 0 12px">Hi ${escapeHtml(input.toName)},</p>
     <p style="margin:0">This is a reminder that a visit is coming up soon.</p>
-    ${emailDetailList([
-      { label: "Patient", value: input.patientName },
-      { label: "Reason", value: input.reason },
-      { label: "When", value: input.whenLabel },
-    ])}
+    ${emailDetailList([{ label: "When", value: input.whenLabel }])}
+    <p style="margin:16px 0 0;color:#64748b;font-size:13px">Patient and clinical details are available only inside the secure PrestigeMD portal.</p>
     ${emailButton(input.portalUrl, "Open visit in PrestigeMD")}
   `,
   )
@@ -198,22 +186,19 @@ export function buildVisitReminderEmail(input: {
 export function buildVisitStatusEmail(input: {
   toName: string
   toEmail: string
-  patientName: string
-  reason: string
   whenLabel: string
   statusLabel: string
   portalUrl: string
 }): OutboundEmail {
-  const subject = `Visit ${input.statusLabel.toLowerCase()}: ${input.patientName}`
+  const subject = `Visit ${input.statusLabel.toLowerCase()} in PrestigeMD`
   const text = [
     `Hi ${input.toName},`,
     "",
     `A visit was marked as ${input.statusLabel.toLowerCase()}.`,
-    `Patient: ${input.patientName}`,
-    `Reason: ${input.reason}`,
     `When: ${input.whenLabel}`,
     "",
-    `Open portal: ${input.portalUrl}`,
+    "Open PrestigeMD to view visit details:",
+    input.portalUrl,
   ].join("\n")
 
   const html = wrapHtml(
@@ -222,11 +207,10 @@ export function buildVisitStatusEmail(input: {
     <p style="margin:0 0 12px">Hi ${escapeHtml(input.toName)},</p>
     <p style="margin:0">A visit was marked as <strong>${escapeHtml(input.statusLabel.toLowerCase())}</strong>.</p>
     ${emailDetailList([
-      { label: "Patient", value: input.patientName },
-      { label: "Reason", value: input.reason },
       { label: "When", value: input.whenLabel },
       { label: "Status", value: input.statusLabel },
     ])}
+    <p style="margin:16px 0 0;color:#64748b;font-size:13px">Patient and clinical details are available only inside the secure PrestigeMD portal.</p>
     ${emailButton(input.portalUrl, "Open visit in PrestigeMD")}
   `,
   )

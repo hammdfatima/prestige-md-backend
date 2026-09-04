@@ -7,13 +7,8 @@ import {
   type NotificationInput,
 } from "~/services/notification-service"
 
-function patientName(visit: VisitEmailPayload) {
-  return `${visit.patient.firstName} ${visit.patient.lastName}`.trim()
-}
-
-function reasonLabel(visit: VisitEmailPayload) {
-  return visit.reason.trim() || "Video visit"
-}
+const SECURE_PORTAL_HINT =
+  "Open PrestigeMD to view patient and clinical details securely."
 
 function doctorHref(visitId: string) {
   return `/doctor/appointments/${visitId}`
@@ -54,7 +49,7 @@ async function withOrgRecipients(
       recipientId: visit.facilityId,
       type: base[0]?.type ?? NotificationType.VISIT_BOOKED,
       title: base[0]?.title ?? "Visit update",
-      body: base[0]?.body ?? reasonLabel(visit),
+      body: base[0]?.body ?? SECURE_PORTAL_HINT,
       href: facilityHref(),
       visitId: visit.id,
     })
@@ -67,7 +62,7 @@ async function withOrgRecipients(
         recipientId: adminId,
         type: base[0]?.type ?? NotificationType.VISIT_BOOKED,
         title: base[0]?.title ?? "Visit update",
-        body: base[0]?.body ?? reasonLabel(visit),
+        body: base[0]?.body ?? SECURE_PORTAL_HINT,
         href: adminHref(),
         visitId: visit.id,
       })
@@ -78,9 +73,7 @@ async function withOrgRecipients(
 }
 
 export async function notifyVisitBookedInApp(visit: VisitEmailPayload) {
-  const patient = patientName(visit)
-  const reason = reasonLabel(visit)
-  const body = `${patient} — ${reason}`
+  const body = SECURE_PORTAL_HINT
 
   await safeNotify(`visit-booked ${visit.id}`, () =>
     withOrgRecipients(visit, [
@@ -105,9 +98,7 @@ export async function notifyVisitBookedInApp(visit: VisitEmailPayload) {
 }
 
 export async function notifyVisitReminderInApp(visit: VisitEmailPayload) {
-  const patient = patientName(visit)
-  const reason = reasonLabel(visit)
-  const body = `${patient} — ${reason}`
+  const body = SECURE_PORTAL_HINT
 
   await safeNotify(`visit-reminder ${visit.id}`, () =>
     withOrgRecipients(
@@ -130,7 +121,6 @@ export async function notifyVisitReminderInApp(visit: VisitEmailPayload) {
           visitId: visit.id,
         },
       ],
-      // Reminders are operational — facility yes, skip flooding all admins
       { includeAdmins: false, includeFacility: true },
     ),
   )
@@ -140,8 +130,6 @@ export async function notifyVisitStatusInApp(
   visit: VisitEmailPayload,
   status: "cancelled" | "completed" | "missed",
 ) {
-  const patient = patientName(visit)
-  const reason = reasonLabel(visit)
   const type =
     status === "cancelled"
       ? NotificationType.VISIT_CANCELLED
@@ -154,7 +142,7 @@ export async function notifyVisitStatusInApp(
       : status === "completed"
         ? "Visit completed"
         : "Visit missed"
-  const body = `${patient} — ${reason}`
+  const body = SECURE_PORTAL_HINT
 
   await safeNotify(`visit-${status} ${visit.id}`, () =>
     withOrgRecipients(visit, [
@@ -182,9 +170,6 @@ export async function notifyVisitMessageInApp(input: {
   recipientId: string
   recipientRole: "DOCTOR" | "NURSE"
   visitId: string
-  senderName: string
-  preview: string
-  patientName: string
 }) {
   const href =
     input.recipientRole === "DOCTOR"
@@ -196,8 +181,8 @@ export async function notifyVisitMessageInApp(input: {
       {
         recipientId: input.recipientId,
         type: NotificationType.MESSAGE,
-        title: `Message from ${input.senderName}`,
-        body: input.preview || `New message about ${input.patientName}`,
+        title: "New visit message",
+        body: SECURE_PORTAL_HINT,
         href,
         visitId: input.visitId,
       },

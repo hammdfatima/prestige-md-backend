@@ -6,6 +6,7 @@ import {
   recordMessageAccessed,
   recordMessageSent,
   recordVisitClinicalNotesUpdated,
+  recordVisitListViewed,
 } from "~/lib/phi-access-audit";
 import { getAuthUser } from "~/middlewares/auth";
 import type {
@@ -33,7 +34,17 @@ export const listVisitsHandler = asyncHandler<
   Record<string, never>,
   ListVisitsQuery
 >(async (req, res) => {
-  const data = await visitService.listVisits(getAuthUser(req), req.query);
+  const user = getAuthUser(req);
+  const auditContext = auditContextFromRequest(req);
+  const data = await visitService.listVisits(user, req.query);
+  await recordVisitListViewed(
+    user,
+    data.length,
+    {
+      hasPatientFilter: Boolean(req.query.patientId),
+    },
+    auditContext,
+  );
   return res.status(HttpStatus.OK).json({
     message: "Visits fetched successfully",
     data,
@@ -47,7 +58,7 @@ export const getVisitHandler = asyncHandler<
   const user = getAuthUser(req);
   const auditContext = auditContextFromRequest(req);
   const data = await visitService.getVisit(user, req.params.id);
-  recordAppointmentViewed(user, req.params.id, auditContext);
+  await recordAppointmentViewed(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Visit fetched successfully",
     data,
@@ -87,7 +98,7 @@ export const updateVisitNotesHandler = asyncHandler<
     req.params.id,
     req.body,
   );
-  recordVisitClinicalNotesUpdated(user, req.params.id, auditContext);
+  await recordVisitClinicalNotesUpdated(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Visit notes updated successfully",
     data,
@@ -129,7 +140,7 @@ export const listVisitMessagesHandler = asyncHandler<
     user,
     req.params.id,
   );
-  recordMessageAccessed(user, req.params.id, auditContext);
+  await recordMessageAccessed(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Visit messages fetched successfully",
     data,
@@ -161,7 +172,7 @@ export const sendVisitMessageHandler = asyncHandler<
     req.params.id,
     req.body,
   );
-  recordMessageSent(user, data.id, auditContext);
+  await recordMessageSent(user, data.id, auditContext);
   return res.status(HttpStatus.CREATED).json({
     message: "Message sent",
     data,

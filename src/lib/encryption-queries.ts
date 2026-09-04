@@ -12,6 +12,10 @@ export function patientEmailWhere(email: string) {
   return { emailLookupHash: emailLookupHash(email) };
 }
 
+export function patientMemberIdWhere(memberId: string) {
+  return { memberIdLookupHash: hashLookupValue(memberId.trim().toUpperCase()) };
+}
+
 export function employeeIdWhere(employeeId: string) {
   return { employeeIdLookupHash: hashLookupValue(employeeId.trim()) };
 }

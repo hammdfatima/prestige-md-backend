@@ -25,7 +25,7 @@ export const listMedicationsHandler = asyncHandler<
   const user = getAuthUser(req);
   const auditContext = auditContextFromRequest(req);
   const data = await patientCareService.listMedications(user, req.params.id);
-  recordPrescriptionViewed(user, req.params.id, auditContext);
+  await recordPrescriptionViewed(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Medications fetched successfully",
     data,
@@ -43,7 +43,7 @@ export const createMedicationHandler = asyncHandler<
     req.params.id,
     req.body,
   );
-  recordPrescriptionCreated(user, data.id, auditContext);
+  await recordPrescriptionCreated(user, data.id, auditContext);
   return res.status(HttpStatus.CREATED).json({
     message: "Medication added successfully",
     data,
@@ -62,7 +62,7 @@ export const updateMedicationHandler = asyncHandler<
     req.params.medicationId,
     req.body,
   );
-  recordPrescriptionUpdated(user, data.id, auditContext);
+  await recordPrescriptionUpdated(user, data.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Medication updated successfully",
     data,
@@ -80,7 +80,7 @@ export const deleteMedicationHandler = asyncHandler<
     req.params.id,
     req.params.medicationId,
   );
-  recordPrescriptionDeleted(user, data.id, auditContext);
+  await recordPrescriptionDeleted(user, data.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Medication removed successfully",
     data,
@@ -94,7 +94,7 @@ export const getNotesHandler = asyncHandler<
   const user = getAuthUser(req);
   const auditContext = auditContextFromRequest(req);
   const data = await patientCareService.getNotes(user, req.params.id);
-  recordClinicalNotesViewed(user, req.params.id, auditContext);
+  await recordClinicalNotesViewed(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Notes fetched successfully",
     data,
@@ -112,7 +112,7 @@ export const updateNotesHandler = asyncHandler<
     req.params.id,
     req.body,
   );
-  recordClinicalNotesUpdated(user, req.params.id, auditContext);
+  await recordClinicalNotesUpdated(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Notes saved successfully",
     data,

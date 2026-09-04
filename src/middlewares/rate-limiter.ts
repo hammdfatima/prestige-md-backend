@@ -1,11 +1,16 @@
 /** HIPAA §7.3 API rate limiting — global, login, and export throttles. */
-import rateLimit, { type Options } from "express-rate-limit";
+import Redis from "ioredis";
+import rateLimit, { type Options, type Store } from "express-rate-limit";
+import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { status as HttpStatus } from "http-status";
 import env from "~/env";
 import logger from "~/lib/logger";
 
 function rateLimitHandler(message: string) {
-  return (_req: unknown, res: { status: (code: number) => { json: (body: unknown) => void } }) => {
+  return (
+    _req: unknown,
+    res: { status: (code: number) => { json: (body: unknown) => void } },
+  ) => {
     res.status(HttpStatus.TOO_MANY_REQUESTS).json({
       success: false,
       error: {
@@ -16,42 +21,73 @@ function rateLimitHandler(message: string) {
   };
 }
 
-const limiterOptions: Partial<Options> = {
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: rateLimitHandler(
-    "Too many requests from this IP, please try again later.",
-  ),
-};
+let redisClient: Redis | null = null;
+let rateLimitStore: Store | undefined;
 
-if (env.REDIS_URL) {
-  logger.warn(
-    "REDIS_URL is set, but Redis is unreachable from this environment. Rate limiting will use the in-memory store.",
-  );
-} else {
-  logger.warn("REDIS_URL is not set; rate limiting will use in-memory store.");
+function getRateLimitStore(): Store | undefined {
+  if (!env.REDIS_URL) {
+    return undefined;
+  }
+
+  if (!rateLimitStore) {
+    redisClient = new Redis(env.REDIS_URL, {
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
+
+    redisClient.on("error", (error) => {
+      logger.error("Redis rate-limit client error");
+      logger.error(error);
+    });
+
+    rateLimitStore = new RedisStore({
+      sendCommand: (command: string, ...args: string[]) =>
+        redisClient!.call(command, ...args) as Promise<RedisReply>,
+    });
+
+    logger.info("Rate limiting will use the Redis store.");
+  }
+
+  return rateLimitStore;
 }
 
-export const limiter = rateLimit(limiterOptions);
+function createLimiterOptions(
+  message: string,
+  overrides: Partial<Options> = {},
+): Partial<Options> {
+  const store = getRateLimitStore();
 
-export const authLoginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: rateLimitHandler(
+  if (!store) {
+    logger.warn("REDIS_URL is not set; rate limiting will use the in-memory store.");
+  }
+
+  return {
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: rateLimitHandler(message),
+    ...(store ? { store } : {}),
+    ...overrides,
+  };
+}
+
+export const limiter = rateLimit(
+  createLimiterOptions(
+    "Too many requests from this IP, please try again later.",
+  ),
+);
+
+export const authLoginLimiter = rateLimit(
+  createLimiterOptions(
     "Too many login attempts from this IP, please try again later.",
+    { max: 30 },
   ),
-});
+);
 
-export const patientExportLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: rateLimitHandler(
+export const patientExportLimiter = rateLimit(
+  createLimiterOptions(
     "Too many patient export requests. Try again later.",
+    { windowMs: 60 * 60 * 1000, max: 5 },
   ),
-});
+);

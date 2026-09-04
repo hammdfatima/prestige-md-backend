@@ -289,7 +289,8 @@ enum ExaminerTitle {
 /// Residents do not log in. Admin (and later nurse/facility) create the chart.
 model Patient {
   id             String @id @default(uuid())
-  memberId       String @unique
+  memberId       String
+  memberIdLookupHash String? @unique
   firstName      String
   lastName       String
   email          String?
@@ -382,6 +383,7 @@ model Patient {
   @@index([facilityId])
   @@index([createdByUserId])
   @@index([emailLookupHash])
+  @@index([memberIdLookupHash])
   @@index([deletionRequestedAt])
   @@index([anonymizedAt])
   @@map("patients")

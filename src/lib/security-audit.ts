@@ -1,6 +1,8 @@
 /** HIPAA §3.1 security audit logging — centralized append-only event writer. */
 import prisma from "~/lib/db";
 import logger from "~/lib/logger";
+import { HttpError } from "~/middlewares/error-handler";
+import { status as HttpStatus } from "http-status";
 
 export const SECURITY_AUDIT_EVENTS = {
   LOGIN_SUCCESS: "LOGIN_SUCCESS",
@@ -17,7 +19,9 @@ export const SECURITY_AUDIT_EVENTS = {
   STEP_UP_AUTH_SUCCESS: "STEP_UP_AUTH_SUCCESS",
   STEP_UP_AUTH_FAILURE: "STEP_UP_AUTH_FAILURE",
   ADMIN_PROMOTED: "ADMIN_PROMOTED",
+  ADMIN_PRIVILEGED_ACCESS: "ADMIN_PRIVILEGED_ACCESS",
   PATIENT_RECORD_VIEWED: "PATIENT_RECORD_VIEWED",
+  PATIENT_LIST_VIEWED: "PATIENT_LIST_VIEWED",
   PATIENT_RECORD_UPDATED: "PATIENT_RECORD_UPDATED",
   PATIENT_RECORD_CREATED: "PATIENT_RECORD_CREATED",
   PATIENT_RECORD_DELETED: "PATIENT_RECORD_DELETED",
@@ -34,6 +38,7 @@ export const SECURITY_AUDIT_EVENTS = {
   FILE_ACCESSED: "FILE_ACCESSED",
   FILE_DELETED: "FILE_DELETED",
   APPOINTMENT_VIEWED: "APPOINTMENT_VIEWED",
+  VISIT_LIST_VIEWED: "VISIT_LIST_VIEWED",
   PATIENT_DELETION_REQUESTED: "PATIENT_DELETION_REQUESTED",
   RETENTION_JOB_RUN: "RETENTION_JOB_RUN",
   IN_CONTEXT_CONSENT_ACCEPTED: "IN_CONTEXT_CONSENT_ACCEPTED",
@@ -76,6 +81,7 @@ export function normalizeAuditContext(context: AuditRequestContext = {}) {
  */
 export async function recordSecurityAuditEvent(
   input: RecordSecurityAuditEventInput,
+  options: { required?: boolean } = {},
 ): Promise<void> {
   const { ipAddress, userAgent } = normalizeAuditContext(input.context);
 
@@ -96,5 +102,13 @@ export async function recordSecurityAuditEvent(
       `Failed to record security audit event ${input.eventType} for ${input.actorEmail}`,
     );
     logger.error(error);
+
+    if (options.required) {
+      throw new HttpError(
+        "Unable to complete request. Audit logging is unavailable.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "AUDIT_WRITE_FAILED",
+      );
+    }
   }
 }

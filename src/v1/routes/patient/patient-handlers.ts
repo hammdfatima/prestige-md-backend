@@ -3,6 +3,7 @@ import { asyncHandler } from "~/lib/async-handler";
 import { auditContextFromRequest } from "~/lib/audit-request-context";
 import {
   recordPatientDeletionRequested,
+  recordPatientListViewed,
   recordPatientRecordCreated,
   recordPatientRecordExported,
   recordPatientRecordUpdated,
@@ -25,7 +26,7 @@ export const createPatientHandler = asyncHandler<CreatePatientBody>(
     const user = getAuthUser(req);
     const auditContext = auditContextFromRequest(req);
     const data = await patientService.createPatient(req.body, user);
-    recordPatientRecordCreated(user, data.id, auditContext);
+    await recordPatientRecordCreated(user, data.id, auditContext);
     return res.status(HttpStatus.CREATED).json({
       message: "Patient added successfully",
       data,
@@ -38,9 +39,18 @@ export const listPatientsHandler = asyncHandler<
   Record<string, never>,
   ListPatientsQuery
 >(async (req, res) => {
-  const data = await patientService.listPatientsForViewer(
-    getAuthUser(req),
-    req.query,
+  const user = getAuthUser(req);
+  const auditContext = auditContextFromRequest(req);
+  const data = await patientService.listPatientsForViewer(user, req.query);
+  await recordPatientListViewed(
+    user,
+    data.length,
+    {
+      hasSearch: Boolean(req.query.search?.trim()),
+      hasStatusFilter: Boolean(req.query.status),
+      hasFacilityFilter: Boolean(req.query.facilityId),
+    },
+    auditContext,
   );
   return res.status(HttpStatus.OK).json({
     message: "Patients fetched successfully",
@@ -55,7 +65,7 @@ export const getPatientHandler = asyncHandler<
   const user = getAuthUser(req);
   const auditContext = auditContextFromRequest(req);
   const data = await patientService.getPatientForViewer(user, req.params.id);
-  recordPatientRecordViewed(user, req.params.id, auditContext);
+  await recordPatientRecordViewed(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Patient fetched successfully",
     data,
@@ -69,7 +79,7 @@ export const updatePatientHandler = asyncHandler<
   const user = getAuthUser(req);
   const auditContext = auditContextFromRequest(req);
   const data = await patientService.updatePatient(req.params.id, req.body, user);
-  recordPatientRecordUpdated(user, req.params.id, auditContext);
+  await recordPatientRecordUpdated(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Patient updated successfully",
     data,
@@ -87,7 +97,7 @@ export const exportPatientsHandler = asyncHandler<
     user,
     String(req.query.stepUpToken ?? ""),
   );
-  recordPatientRecordExported(user, "patient_export_list", auditContext);
+  await recordPatientRecordExported(user, "patient_export_list", auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Patient export ready",
     data,
@@ -106,7 +116,7 @@ export const exportPatientBundleHandler = asyncHandler<
     req.params.id,
     String(req.query.stepUpToken ?? ""),
   );
-  recordPatientRecordExported(user, req.params.id, auditContext);
+  await recordPatientRecordExported(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Patient chart export ready",
     data,
@@ -124,7 +134,7 @@ export const requestPatientDeletionHandler = asyncHandler<
     req.params.id,
     req.body.stepUpToken,
   );
-  recordPatientDeletionRequested(user, req.params.id, auditContext);
+  await recordPatientDeletionRequested(user, req.params.id, auditContext);
   return res.status(HttpStatus.OK).json({
     message: "Patient deletion request recorded",
     data,

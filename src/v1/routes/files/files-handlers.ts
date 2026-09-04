@@ -28,7 +28,7 @@ export const uploadFile = asyncHandler(async (req, res: Response) => {
   }
 
   const data = await filesService.uploadUserFile(user, file);
-  recordFileUploaded(user, data.publicId, auditContext);
+  await recordFileUploaded(user, data.publicId, auditContext);
 
   return res.status(201).json({
     success: true,
@@ -55,7 +55,7 @@ export const completeUpload = asyncHandler(
     const user = getAuthUser(req);
     const auditContext = auditContextFromRequest(req);
     const data = await filesService.completeUserUpload(user, req.body);
-    recordFileUploaded(user, data.publicId, auditContext);
+    await recordFileUploaded(user, data.publicId, auditContext);
 
     return res.status(200).json({
       success: true,
@@ -73,7 +73,7 @@ export const getFileAccess = asyncHandler<
   const user = getAuthUser(req);
   const auditContext = auditContextFromRequest(req);
   const data = await filesService.getUserFileAccess(user, req.query);
-  recordFileAccessed(user, auditContext);
+  await recordFileAccessed(user, auditContext);
 
   return res.status(200).json({
     success: true,
@@ -86,7 +86,7 @@ export const listFiles = asyncHandler(async (req, res: Response) => {
   const user = getAuthUser(req);
   const auditContext = auditContextFromRequest(req);
   const data = await filesService.listUserFiles(user);
-  recordFileAccessed(user, auditContext);
+  await recordFileAccessed(user, auditContext);
 
   return res.status(200).json({
     success: true,
@@ -100,7 +100,7 @@ export const deleteFile = asyncHandler(
     const user = getAuthUser(req);
     const auditContext = auditContextFromRequest(req);
     const data = await filesService.deleteUserFile(user, req.body);
-    recordFileDeleted(user, req.body.publicId, auditContext);
+    await recordFileDeleted(user, req.body.publicId, auditContext);
 
     return res.status(200).json({
       success: true,

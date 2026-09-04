@@ -169,6 +169,11 @@ export const LOOKUP_HASH_FIELDS_BY_MODEL: Partial<
       hashField: "emailLookupHash",
       normalize: (value) => value.trim().toLowerCase(),
     },
+    {
+      sourceField: "memberId",
+      hashField: "memberIdLookupHash",
+      normalize: (value) => value.trim().toUpperCase(),
+    },
   ],
   securityAuditEvent: [
     {

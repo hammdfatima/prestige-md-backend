@@ -38,10 +38,6 @@ function personName(user: VisitEmailParticipant) {
   return `${user.firstName} ${user.lastName}`.trim() || "there"
 }
 
-function patientName(visit: VisitEmailPayload) {
-  return `${visit.patient.firstName} ${visit.patient.lastName}`.trim()
-}
-
 function whenLabel(scheduledAt: Date) {
   return format(scheduledAt, "MMM d, yyyy 'at' h:mm a")
 }
@@ -70,9 +66,7 @@ async function safeSend(
 }
 
 export async function notifyVisitBooked(visit: VisitEmailPayload) {
-  const reason = visit.reason.trim() || "Video visit"
   const when = whenLabel(visit.scheduledAt)
-  const patient = patientName(visit)
 
   await Promise.all([
     notifyVisitBookedInApp(visit),
@@ -81,8 +75,6 @@ export async function notifyVisitBooked(visit: VisitEmailPayload) {
         buildVisitBookedEmail({
           toName: personName(visit.provider),
           toEmail: visit.provider.email,
-          patientName: patient,
-          reason,
           whenLabel: when,
           portalUrl: doctorPortalUrl(visit.id),
           recipientRole: "doctor",
@@ -95,8 +87,6 @@ export async function notifyVisitBooked(visit: VisitEmailPayload) {
             buildVisitBookedEmail({
               toName: personName(visit.bookedBy),
               toEmail: visit.bookedBy.email,
-              patientName: patient,
-              reason,
               whenLabel: when,
               portalUrl: nursePortalUrl(visit.id),
               recipientRole: "nurse",
@@ -108,9 +98,7 @@ export async function notifyVisitBooked(visit: VisitEmailPayload) {
 }
 
 export async function notifyVisitReminder(visit: VisitEmailPayload) {
-  const reason = visit.reason.trim() || "Video visit"
   const when = whenLabel(visit.scheduledAt)
-  const patient = patientName(visit)
 
   await Promise.all([
     notifyVisitReminderInApp(visit),
@@ -119,8 +107,6 @@ export async function notifyVisitReminder(visit: VisitEmailPayload) {
         buildVisitReminderEmail({
           toName: personName(visit.provider),
           toEmail: visit.provider.email,
-          patientName: patient,
-          reason,
           whenLabel: when,
           portalUrl: doctorPortalUrl(visit.id),
         }),
@@ -132,8 +118,6 @@ export async function notifyVisitReminder(visit: VisitEmailPayload) {
             buildVisitReminderEmail({
               toName: personName(visit.bookedBy),
               toEmail: visit.bookedBy.email,
-              patientName: patient,
-              reason,
               whenLabel: when,
               portalUrl: nursePortalUrl(visit.id),
             }),
@@ -147,9 +131,7 @@ export async function notifyVisitStatus(
   visit: VisitEmailPayload,
   status: "cancelled" | "completed" | "missed",
 ) {
-  const reason = visit.reason.trim() || "Video visit"
   const when = whenLabel(visit.scheduledAt)
-  const patient = patientName(visit)
   const statusLabel =
     status === "cancelled"
       ? "Cancelled"
@@ -179,8 +161,6 @@ export async function notifyVisitStatus(
           buildVisitStatusEmail({
             toName: personName(item.user),
             toEmail: item.user.email,
-            patientName: patient,
-            reason,
             whenLabel: when,
             statusLabel,
             portalUrl: item.portalUrl,
