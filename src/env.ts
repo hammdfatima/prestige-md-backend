@@ -80,15 +80,24 @@ const EnvSchema = z
     AGORA_APP_CERTIFICATE: z.string().optional(),
     /** Legacy alias for AGORA_APP_CERTIFICATE */
     AGORA_APP_TOKEN: z.string().optional(),
-    /** When true, login requires email OTP after password. Defaults to false for local dev. */
+    /** When true, login requires email OTP after password. Defaults to false for local/staging. */
     MFA_ENABLED: z
+      .enum(["true", "false"])
+      .optional()
+      .default("false")
+      .transform((value) => value === "true"),
+    /**
+     * When true, enforce HIPAA production controls (KMS, MFA, Redis, no plaintext DEK).
+     * Keep false on staging until go-live. Set true for real production.
+     */
+    ENFORCE_PRODUCTION_SECURITY: z
       .enum(["true", "false"])
       .optional()
       .default("false")
       .transform((value) => value === "true"),
   })
   .superRefine((data, ctx) => {
-    if (process.env.NODE_ENV !== "production") {
+    if (!data.ENFORCE_PRODUCTION_SECURITY) {
       return;
     }
 
