@@ -47,7 +47,7 @@ export const createPatientSchema = z
 
     facilityId: z.uuid("Invalid facility id"),
 
-    avatarUrl: z.string().min(1, "Upload a profile photo"),
+    avatarUrl: z.string().optional(),
     avatarPublicId: z.string().optional(),
 
     knownAllergies: z.string().min(1, "Enter known allergies or None"),

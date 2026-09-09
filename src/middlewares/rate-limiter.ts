@@ -23,6 +23,21 @@ function rateLimitHandler(message: string) {
 
 let redisClient: Redis | null = null;
 let redisStoreReadyLogged = false;
+let redisErrorLogged = false;
+let redisUnreachable = false;
+
+function isUnrecoverableRedisError(error: unknown) {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : "";
+  return (
+    code === "ENOTFOUND" ||
+    code === "EAI_AGAIN" ||
+    code === "ECONNREFUSED" ||
+    code === "ENETUNREACH"
+  );
+}
 
 function getRedisClient(): Redis | null {
   if (!env.REDIS_URL) {
@@ -35,6 +50,9 @@ function getRedisClient(): Redis | null {
       maxRetriesPerRequest: null,
       enableOfflineQueue: true,
       retryStrategy(times) {
+        if (redisUnreachable) {
+          return null;
+        }
         if (times === 1 || times % 20 === 0) {
           logger.warn(
             `Redis unreachable (attempt ${times}); rate-limit commands will retry. Fix REDIS_URL or clear it to use in-memory limits.`,
@@ -45,11 +63,20 @@ function getRedisClient(): Redis | null {
     });
 
     redisClient.on("error", (error) => {
+      if (isUnrecoverableRedisError(error)) {
+        redisUnreachable = true;
+      }
+      if (redisErrorLogged) {
+        return;
+      }
+      redisErrorLogged = true;
       logger.error("Redis rate-limit client error");
       logger.error(error);
     });
 
     redisClient.on("connect", () => {
+      redisUnreachable = false;
+      redisErrorLogged = false;
       logger.info("Redis rate-limit client connected");
     });
   }

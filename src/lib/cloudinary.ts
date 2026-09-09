@@ -163,7 +163,17 @@ function signUploadParams(
   params: Record<string, string | number>,
   apiSecret: string,
 ) {
-  return cloudinary.utils.api_sign_request(params, apiSecret);
+  // Cloudinary's upload API verifies with signature version 1 (unencoded) unless
+  // signature_version is sent. Version 2 is the Node SDK default and would
+  // mismatch the string Cloudinary shows in Invalid Signature errors.
+  return (
+    cloudinary.utils.api_sign_request as (
+      paramsToSign: Record<string, string | number>,
+      apiSecret: string,
+      signatureAlgorithm?: string,
+      signatureVersion?: number,
+    ) => string
+  )(params, apiSecret, "sha256", 1);
 }
 
 function assertEncryptedUploadResponse(payload: UploadApiResponse) {
@@ -231,7 +241,8 @@ export function createPresignedUpload(options: {
 
 /**
  * Upload via Cloudinary's REST API with a SHA-256 signature that binds
- * allowed_formats (content type) and max_file_size (content length).
+ * allowed_formats (content type). File size is enforced before signing and
+ * again after upload; max_file_size is not a signed upload parameter.
  */
 export async function fetchCloudinaryObjectSample(
   secureUrl: string,
@@ -292,7 +303,6 @@ export async function uploadBuffer(
   form.append("signature", signature);
   form.append("folder", String(params.folder));
   form.append("allowed_formats", String(params.allowed_formats));
-  form.append("max_file_size", String(params.max_file_size));
   form.append("unique_filename", String(params.unique_filename));
   form.append("use_filename", String(params.use_filename));
   form.append("context", String(params.context));

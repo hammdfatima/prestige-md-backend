@@ -38,7 +38,14 @@ export async function ensureCloudinaryUploadPolicy() {
     logger.info(`Cloudinary upload preset "${presetName}" updated.`);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Unknown Cloudinary API error";
+      error instanceof Error
+        ? error.message
+        : error &&
+            typeof error === "object" &&
+            "message" in error &&
+            typeof error.message === "string"
+          ? error.message
+          : "Unknown Cloudinary API error";
 
     if (!message.toLowerCase().includes("not found")) {
       logger.warn(

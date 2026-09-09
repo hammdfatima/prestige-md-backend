@@ -161,7 +161,6 @@ export function buildBoundUploadParams(options: {
       folder: options.folder,
       timestamp,
       allowed_formats: allowedFormats,
-      max_file_size: options.contentLength,
       unique_filename: "true",
       use_filename: "true",
       context: `${OBJECT_STORAGE_ENCRYPTION_CONTEXT}|${OBJECT_STORAGE_UPLOAD_POLICY_CONTEXT}`,

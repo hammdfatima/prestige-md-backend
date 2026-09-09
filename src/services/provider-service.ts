@@ -139,13 +139,6 @@ export async function createProvider(
     );
   }
 
-  if (!avatarUrl) {
-    throw new HttpError(
-      "Upload a profile photo for the provider",
-      HttpStatus.BAD_REQUEST,
-    );
-  }
-
   assertOptionalCallerOwnsObjectKey(auth, avatarPublicId);
 
   const primaryFacilityId = facilityIds[0];

@@ -75,9 +75,9 @@ async function getFacilityOrThrow(facilityId: string) {
 
 function toPatientWriteData(input: CreatePatientBody, auth: TokenPayload) {
   const { firstName, lastName } = splitName(input.name);
-  const avatarUrl = input.avatarUrl.trim();
+  const avatarUrl = input.avatarUrl?.trim() || "";
 
-  if (!/^https?:\/\//i.test(avatarUrl)) {
+  if (avatarUrl && !/^https?:\/\//i.test(avatarUrl)) {
     throw new HttpError(
       "avatarUrl must be a Cloudinary HTTPS URL",
       HttpStatus.BAD_REQUEST,

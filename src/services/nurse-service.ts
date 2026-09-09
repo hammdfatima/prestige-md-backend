@@ -172,10 +172,6 @@ export async function createNurse(
     avatarPublicId = uploaded.publicId;
   }
 
-  if (!avatarUrl) {
-    throw new HttpError("Upload a profile photo for the nurse", HttpStatus.BAD_REQUEST);
-  }
-
   const nurse = await prisma.user.create({
     data: {
       firstName,
