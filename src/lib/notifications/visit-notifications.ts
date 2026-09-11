@@ -1,21 +1,31 @@
 import { NotificationType } from "~/generated/prisma/client"
 import logger from "~/lib/logger"
+import prisma from "~/lib/db"
+import { formatWhenLabel } from "~/lib/timezone"
 import type { VisitEmailPayload } from "~/lib/emails/visit-notifications"
 import {
   createNotifications,
-  listAdminRecipientIds,
+  listAdminRecipients,
   type NotificationInput,
 } from "~/services/notification-service"
 
 const SECURE_PORTAL_HINT =
   "Open PrestigeMD to view patient and clinical details securely."
 
-function doctorHref(visitId: string) {
-  return `/doctor/appointments/${visitId}`
+function visitWhenBody(scheduledAt: Date, timeZone?: string | null) {
+  return `Scheduled for ${formatWhenLabel(scheduledAt, timeZone)}. ${SECURE_PORTAL_HINT}`
 }
 
-function nurseHref() {
-  return `/nurse/appointments`
+function doctorHref(visitId: string, tab?: string) {
+  const path = `/doctor/appointments/${visitId}`
+  return tab ? `${path}?tab=${encodeURIComponent(tab)}` : path
+}
+
+function nurseHref(visitId?: string, tab?: string) {
+  if (!visitId) return `/nurse/appointments`
+  const params = new URLSearchParams({ visit: visitId })
+  if (tab) params.set("tab", tab)
+  return `/nurse/appointments?${params.toString()}`
 }
 
 function adminHref() {
@@ -45,24 +55,28 @@ async function withOrgRecipients(
   const items = [...base]
 
   if (includeFacility && visit.facilityId) {
+    const facility = await prisma.facility.findUnique({
+      where: { id: visit.facilityId },
+      select: { timezone: true },
+    })
     items.push({
       recipientId: visit.facilityId,
       type: base[0]?.type ?? NotificationType.VISIT_BOOKED,
       title: base[0]?.title ?? "Visit update",
-      body: base[0]?.body ?? SECURE_PORTAL_HINT,
+      body: visitWhenBody(visit.scheduledAt, facility?.timezone),
       href: facilityHref(),
       visitId: visit.id,
     })
   }
 
   if (includeAdmins) {
-    const adminIds = await listAdminRecipientIds()
-    for (const adminId of adminIds) {
+    const admins = await listAdminRecipients()
+    for (const admin of admins) {
       items.push({
-        recipientId: adminId,
+        recipientId: admin.id,
         type: base[0]?.type ?? NotificationType.VISIT_BOOKED,
         title: base[0]?.title ?? "Visit update",
-        body: base[0]?.body ?? SECURE_PORTAL_HINT,
+        body: visitWhenBody(visit.scheduledAt, admin.timezone),
         href: adminHref(),
         visitId: visit.id,
       })
@@ -73,15 +87,13 @@ async function withOrgRecipients(
 }
 
 export async function notifyVisitBookedInApp(visit: VisitEmailPayload) {
-  const body = SECURE_PORTAL_HINT
-
   await safeNotify(`visit-booked ${visit.id}`, () =>
     withOrgRecipients(visit, [
       {
         recipientId: visit.provider.id,
         type: NotificationType.VISIT_BOOKED,
         title: "Visit booked",
-        body,
+        body: visitWhenBody(visit.scheduledAt, visit.provider.timezone),
         href: doctorHref(visit.id),
         visitId: visit.id,
       },
@@ -89,7 +101,7 @@ export async function notifyVisitBookedInApp(visit: VisitEmailPayload) {
         recipientId: visit.bookedBy.id,
         type: NotificationType.VISIT_BOOKED,
         title: "Visit booked",
-        body,
+        body: visitWhenBody(visit.scheduledAt, visit.bookedBy.timezone),
         href: nurseHref(),
         visitId: visit.id,
       },
@@ -98,8 +110,6 @@ export async function notifyVisitBookedInApp(visit: VisitEmailPayload) {
 }
 
 export async function notifyVisitReminderInApp(visit: VisitEmailPayload) {
-  const body = SECURE_PORTAL_HINT
-
   await safeNotify(`visit-reminder ${visit.id}`, () =>
     withOrgRecipients(
       visit,
@@ -108,7 +118,7 @@ export async function notifyVisitReminderInApp(visit: VisitEmailPayload) {
           recipientId: visit.provider.id,
           type: NotificationType.VISIT_REMINDER,
           title: "Visit starting soon",
-          body,
+          body: visitWhenBody(visit.scheduledAt, visit.provider.timezone),
           href: doctorHref(visit.id),
           visitId: visit.id,
         },
@@ -116,7 +126,7 @@ export async function notifyVisitReminderInApp(visit: VisitEmailPayload) {
           recipientId: visit.bookedBy.id,
           type: NotificationType.VISIT_REMINDER,
           title: "Visit starting soon",
-          body,
+          body: visitWhenBody(visit.scheduledAt, visit.bookedBy.timezone),
           href: nurseHref(),
           visitId: visit.id,
         },
@@ -142,7 +152,6 @@ export async function notifyVisitStatusInApp(
       : status === "completed"
         ? "Visit completed"
         : "Visit missed"
-  const body = SECURE_PORTAL_HINT
 
   await safeNotify(`visit-${status} ${visit.id}`, () =>
     withOrgRecipients(visit, [
@@ -150,7 +159,7 @@ export async function notifyVisitStatusInApp(
         recipientId: visit.provider.id,
         type,
         title,
-        body,
+        body: visitWhenBody(visit.scheduledAt, visit.provider.timezone),
         href: doctorHref(visit.id),
         visitId: visit.id,
       },
@@ -158,7 +167,7 @@ export async function notifyVisitStatusInApp(
         recipientId: visit.bookedBy.id,
         type,
         title,
-        body,
+        body: visitWhenBody(visit.scheduledAt, visit.bookedBy.timezone),
         href: nurseHref(),
         visitId: visit.id,
       },
@@ -173,8 +182,8 @@ export async function notifyVisitMessageInApp(input: {
 }) {
   const href =
     input.recipientRole === "DOCTOR"
-      ? doctorHref(input.visitId)
-      : nurseHref()
+      ? doctorHref(input.visitId, "messages")
+      : nurseHref(input.visitId, "messages")
 
   await safeNotify(`visit-message ${input.visitId}`, () =>
     createNotifications([

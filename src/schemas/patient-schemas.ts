@@ -13,10 +13,16 @@ const dateOnlySchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid date");
 
+const patientGenderSchema = z.enum(
+  ["male", "female", "other", "prefer_not_to_say"],
+  { message: "Select a gender" },
+);
+
 export const createPatientSchema = z
   .object({
     name: z.string().min(2, "Resident name is required"),
     dateOfBirth: dateOnlySchema,
+    gender: patientGenderSchema,
     authorizedRepresentative: z.string().optional(),
     phone: z.string().min(10, "Enter a valid phone number"),
     email: z.email("Enter a valid email address").or(z.literal("")),

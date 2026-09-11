@@ -112,15 +112,13 @@ export async function markAllNotificationsRead(auth: TokenPayload) {
 }
 
 /** Active admin + team-member accounts for org-wide visit alerts. */
-export async function listAdminRecipientIds() {
-  const users = await prisma.user.findMany({
+export async function listAdminRecipients() {
+  return prisma.user.findMany({
     where: {
       status: UserStatus.ACTIVE,
       role: { in: [UserRole.ADMIN, UserRole.TEAM_MEMBER] },
       passwordSetAt: { not: null },
     },
-    select: { id: true },
+    select: { id: true, timezone: true },
   })
-
-  return users.map((user) => user.id)
 }

@@ -12,7 +12,6 @@ export const createProviderSchema = z.object({
     .array(z.uuid("Invalid facility id"))
     .min(1, "Assign the provider to at least one facility"),
   primaryLanguage: z.string().min(1, "Select a primary language"),
-  availability: z.string().min(1, "Availability is required"),
   avatarUrl: z.string().optional(),
   avatarPublicId: z.string().optional(),
 });

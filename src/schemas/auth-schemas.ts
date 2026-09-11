@@ -1,11 +1,24 @@
 import { z } from "zod"
 import { LOGIN_MFA_CODE_LENGTH } from "~/lib/mfa"
 import { newPasswordSchema } from "~/lib/password"
+import {
+  IANA_TIMEZONE_MAX_LENGTH,
+  isValidIanaTimeZone,
+} from "~/lib/timezone"
+
+export const ianaTimeZoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(IANA_TIMEZONE_MAX_LENGTH)
+  .refine(isValidIanaTimeZone, "Enter a valid timezone")
+  .optional()
 
 export const loginSchema = z.object({
   email: z.email("Enter a valid email address"),
   password: z.string().min(1, "Password is required"),
   rememberMe: z.boolean().optional().default(false),
+  timezone: ianaTimeZoneSchema,
 })
 
 export const forgotPasswordSchema = z.object({
@@ -19,6 +32,7 @@ export const facilityInviteQuerySchema = z.object({
 export const setFacilityPasswordSchema = z.object({
   token: z.string().min(1, "Invite token is required"),
   password: newPasswordSchema,
+  timezone: ianaTimeZoneSchema,
 })
 
 export const updateMeSchema = z.object({
@@ -35,6 +49,7 @@ export const updateMeSchema = z.object({
   availability: z.string().optional(),
   location: z.string().optional(),
   facilityName: z.string().optional(),
+  timezone: ianaTimeZoneSchema,
 })
 
 export const updateAvailabilitySchema = z.object({
@@ -53,6 +68,7 @@ export const resetPasswordSchema = z.object({
 
 export const verifyLoginOtpSchema = z.object({
   challengeToken: z.string().min(1, "Login session expired. Please sign in again."),
+  timezone: ianaTimeZoneSchema,
   code: z
     .string()
     .length(

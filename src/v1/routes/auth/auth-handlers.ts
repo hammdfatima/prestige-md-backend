@@ -42,6 +42,7 @@ export const loginHandler = asyncHandler<LoginBody>(async (req, res) => {
   const data = await authService.login(req.body, {
     ipAddress: getRequestIp(req),
     userAgent: getRequestUserAgent(req),
+    timezone: req.body.timezone,
   });
 
   if (data.mfaRequired) {
@@ -62,6 +63,7 @@ export const verifyLoginOtpHandler = asyncHandler<VerifyLoginOtpBody>(
     const data = await authService.verifyLoginOtp(req.body, {
       ipAddress: getRequestIp(req),
       userAgent: getRequestUserAgent(req),
+      timezone: req.body.timezone,
     });
 
     return res.status(HttpStatus.OK).json({
@@ -129,10 +131,10 @@ export const getFacilityInviteHandler = asyncHandler<
 
 export const setFacilityPasswordHandler = asyncHandler<SetFacilityPasswordBody>(
   async (req, res) => {
-    const data = await authService.setFacilityPassword(
-      req.body,
-      auditContextFromRequest(req),
-    );
+    const data = await authService.setFacilityPassword(req.body, {
+      ...auditContextFromRequest(req),
+      timezone: req.body.timezone,
+    });
     return res.status(HttpStatus.OK).json({
       message: "Password set successfully",
       data,

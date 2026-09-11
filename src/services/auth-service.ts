@@ -33,6 +33,7 @@ import {
   verifyStaffInviteToken,
 } from "~/lib/facility-invite";
 import { issueSessionToken } from "~/lib/session-token";
+import { normalizeIanaTimeZone } from "~/lib/timezone";
 import {
   invalidateFacilityCredentials,
   invalidateUserCredentials,
@@ -78,6 +79,7 @@ import type { Facility, User } from "~/generated/prisma/client";
 type LoginContext = {
   ipAddress?: string;
   userAgent?: string;
+  timezone?: string;
 };
 
 type LoginAccount =
@@ -432,11 +434,44 @@ async function issueLoginSession(
   };
 }
 
-async function completeLogin(account: LoginAccount, ctx: LoginContext = {}) {
-  const session = await issueLoginSession(account, ctx);
-  recordLoginSuccess(toAuthAccountRef(account), ctx);
+async function persistAccountTimezone(
+  account: LoginAccount,
+  timezone?: string,
+): Promise<LoginAccount> {
+  const tz = normalizeIanaTimeZone(timezone);
+  if (!tz) {
+    return account;
+  }
 
-  void recordLoginAndNotify(account, ctx).catch((error) => {
+  if (account.kind === "user") {
+    if (account.record.timezone === tz) {
+      return account;
+    }
+
+    const record = await prisma.user.update({
+      where: { id: account.record.id },
+      data: { timezone: tz },
+    });
+    return { kind: "user", record };
+  }
+
+  if (account.record.timezone === tz) {
+    return account;
+  }
+
+  const record = await prisma.facility.update({
+    where: { id: account.record.id },
+    data: { timezone: tz },
+  });
+  return { kind: "facility", record };
+}
+
+async function completeLogin(account: LoginAccount, ctx: LoginContext = {}) {
+  const withTimezone = await persistAccountTimezone(account, ctx.timezone);
+  const session = await issueLoginSession(withTimezone, ctx);
+  recordLoginSuccess(toAuthAccountRef(withTimezone), ctx);
+
+  void recordLoginAndNotify(withTimezone, ctx).catch((error) => {
     logger.error("Failed to send login activity notification");
     logger.error(error);
   });
@@ -566,11 +601,15 @@ async function findActiveLoginMfaOtp(account: LoginAccount) {
 
 export async function login(input: LoginBody, ctx: LoginContext = {}) {
   const { email, password } = input;
+  const loginCtx: LoginContext = {
+    ...ctx,
+    timezone: ctx.timezone ?? input.timezone,
+  };
   const normalizedEmail = email.toLowerCase();
   const account = await findLoginAccount(normalizedEmail);
 
   if (!account) {
-    recordLoginFailed(normalizedEmail, null, ctx);
+    recordLoginFailed(normalizedEmail, null, loginCtx);
     throw new HttpError("Invalid email or password", HttpStatus.UNAUTHORIZED);
   }
 
@@ -580,7 +619,7 @@ export async function login(input: LoginBody, ctx: LoginContext = {}) {
     recordLoginFailed(
       normalizedEmail,
       toAuthAccountRef(account),
-      ctx,
+      loginCtx,
     );
     throw new HttpError(
       lockoutMessage(account.record.lockedUntil as Date),
@@ -594,7 +633,7 @@ export async function login(input: LoginBody, ctx: LoginContext = {}) {
   });
 
   if (!passwordValid) {
-    await handleFailedLogin(account, ctx);
+    await handleFailedLogin(account, loginCtx);
   }
 
   if (account.record.status !== UserStatus.ACTIVE) {
@@ -605,12 +644,12 @@ export async function login(input: LoginBody, ctx: LoginContext = {}) {
   await maybeRehashPassword(account, password);
 
   if (isMfaEnabled()) {
-    return startLoginMfa(account, ctx);
+    return startLoginMfa(account, loginCtx);
   }
 
   return {
     mfaRequired: false as const,
-    ...(await completeLogin(account, ctx)),
+    ...(await completeLogin(account, loginCtx)),
   };
 }
 
@@ -619,6 +658,10 @@ export async function verifyLoginOtp(
   ctx: LoginContext = {},
 ) {
   const startedAt = Date.now();
+  const loginCtx: LoginContext = {
+    ...ctx,
+    timezone: ctx.timezone ?? input.timezone,
+  };
 
   let challenge: ReturnType<typeof verifyLoginMfaChallengeToken>;
   try {
@@ -676,9 +719,9 @@ export async function verifyLoginOtp(
     data: { consumedAt: new Date() },
   });
 
-  recordMfaChallengePassed(toAuthAccountRef(account), ctx);
+  recordMfaChallengePassed(toAuthAccountRef(account), loginCtx);
 
-  return completeLogin(account, ctx);
+  return completeLogin(account, loginCtx);
 }
 
 export async function resendLoginOtp(
@@ -761,6 +804,10 @@ export async function setFacilityPassword(
   input: SetFacilityPasswordBody,
   ctx: LoginContext = {},
 ) {
+  const loginCtx: LoginContext = {
+    ...ctx,
+    timezone: ctx.timezone ?? input.timezone,
+  };
   let type: ReturnType<typeof readInviteType>;
   try {
     type = readInviteType(input.token);
@@ -779,8 +826,8 @@ export async function setFacilityPassword(
     });
 
     const account = { kind: "user" as const, record: updated };
-    recordSignupCompleted(toAuthAccountRef(account), ctx);
-    return completeLogin(account, ctx);
+    recordSignupCompleted(toAuthAccountRef(account), loginCtx);
+    return completeLogin(account, loginCtx);
   }
 
   const facility = await getFacilityFromInvite(input.token);
@@ -794,8 +841,8 @@ export async function setFacilityPassword(
   });
 
   const facilityAccount = { kind: "facility" as const, record: updated };
-  recordSignupCompleted(toAuthAccountRef(facilityAccount), ctx);
-  return completeLogin(facilityAccount, ctx);
+  recordSignupCompleted(toAuthAccountRef(facilityAccount), loginCtx);
+  return completeLogin(facilityAccount, loginCtx);
 }
 
 export async function forgotPassword(

@@ -24,10 +24,22 @@ async function sendUpcomingVisitReminders() {
     include: {
       patient: { select: { firstName: true, lastName: true, facilityId: true } },
       provider: {
-        select: { id: true, firstName: true, lastName: true, email: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          timezone: true,
+        },
       },
       bookedBy: {
-        select: { id: true, firstName: true, lastName: true, email: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          timezone: true,
+        },
       },
     },
   });

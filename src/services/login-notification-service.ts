@@ -10,6 +10,7 @@ import {
 import logger from "~/lib/logger";
 import { sendEmail } from "~/lib/mailer";
 import { HttpError } from "~/middlewares/error-handler";
+import { formatSignedInAtLabel } from "~/lib/timezone";
 import { status as HttpStatus } from "http-status";
 import type {
   LoginAccountRef,
@@ -127,10 +128,10 @@ export async function recordLoginAndNotify(
       email: account.record.email,
       deviceLabel,
       locationLabel: formatLoginLocation(ctx.ipAddress),
-      signedInAtLabel: signedInAt.toLocaleString("en-US", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }),
+      signedInAtLabel: formatSignedInAtLabel(
+        signedInAt,
+        account.record.timezone,
+      ),
       isNewDevice,
       reportUrl,
     }),

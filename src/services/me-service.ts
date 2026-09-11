@@ -83,6 +83,7 @@ export function publicFacilityAccount(facility: Facility) {
     facilityId: facility.id,
     facilityName: facility.name,
     location: facility.location,
+    timezone: facility.timezone,
     createdAt: facility.createdAt,
     updatedAt: facility.updatedAt,
   };
@@ -181,6 +182,9 @@ async function updateFacilityMe(auth: TokenPayload, input: UpdateMeBody) {
       location,
       avatarUrl,
       avatarPublicId,
+      ...(input.timezone
+        ? { timezone: input.timezone }
+        : {}),
     },
   });
 
@@ -238,6 +242,7 @@ export async function updateMe(auth: TokenPayload, input: UpdateMeBody) {
       ...(input.availability !== undefined
         ? { availability: input.availability.trim() }
         : {}),
+      ...(input.timezone ? { timezone: input.timezone } : {}),
     },
     include: userInclude,
   });

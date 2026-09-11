@@ -70,6 +70,8 @@ model User {
   primaryLanguage String?
   availability   String?
   isAvailable    Boolean    @default(false)
+  /// IANA timezone (e.g. America/New_York). Used for emails and displayed times — not PHI.
+  timezone       String?
   /// Assigned only for TEAM_MEMBER. Main ADMIN has full access.
   permissions    String[]   @default([])
   facilityId     String?
@@ -129,6 +131,8 @@ model Facility {
   failedLoginAttempts Int       @default(0)
   lockedUntil        DateTime?
   tokenVersion       Int        @default(0)
+  /// IANA timezone (e.g. America/New_York). Used for emails and displayed times — not PHI.
+  timezone      String?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
@@ -286,6 +290,13 @@ enum ExaminerTitle {
   PA
 }
 
+enum PatientGender {
+  male
+  female
+  other
+  prefer_not_to_say
+}
+
 /// Residents do not log in. Admin (and later nurse/facility) create the chart.
 model Patient {
   id             String @id @default(uuid())
@@ -297,6 +308,7 @@ model Patient {
   emailLookupHash String? @unique
   phone          String
   dateOfBirth    String
+  gender         PatientGender?
   avatarUrl      String
   avatarPublicId String?
 

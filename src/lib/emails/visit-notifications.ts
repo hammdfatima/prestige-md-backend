@@ -1,5 +1,5 @@
-import { format } from "date-fns"
-import type { User, VisitStatus } from "~/generated/prisma/client"
+import { formatWhenLabel } from "~/lib/timezone"
+import type { VisitStatus } from "~/generated/prisma/client"
 import { getAppBaseUrl } from "~/lib/app-url"
 import {
   buildVisitBookedEmail,
@@ -14,10 +14,13 @@ import {
   notifyVisitStatusInApp,
 } from "~/lib/notifications/visit-notifications"
 
-type VisitEmailParticipant = Pick<
-  User,
-  "id" | "firstName" | "lastName" | "email"
->
+type VisitEmailParticipant = {
+  id: string
+  firstName: string
+  lastName: string
+  email: string
+  timezone?: string | null
+}
 
 export type VisitEmailPayload = {
   id: string
@@ -38,8 +41,8 @@ function personName(user: VisitEmailParticipant) {
   return `${user.firstName} ${user.lastName}`.trim() || "there"
 }
 
-function whenLabel(scheduledAt: Date) {
-  return format(scheduledAt, "MMM d, yyyy 'at' h:mm a")
+function whenLabel(scheduledAt: Date, timeZone?: string | null) {
+  return formatWhenLabel(scheduledAt, timeZone)
 }
 
 function doctorPortalUrl(visitId: string) {
@@ -66,8 +69,6 @@ async function safeSend(
 }
 
 export async function notifyVisitBooked(visit: VisitEmailPayload) {
-  const when = whenLabel(visit.scheduledAt)
-
   await Promise.all([
     notifyVisitBookedInApp(visit),
     safeSend(`visit-booked doctor ${visit.id}`, () =>
@@ -75,7 +76,7 @@ export async function notifyVisitBooked(visit: VisitEmailPayload) {
         buildVisitBookedEmail({
           toName: personName(visit.provider),
           toEmail: visit.provider.email,
-          whenLabel: when,
+          whenLabel: whenLabel(visit.scheduledAt, visit.provider.timezone),
           portalUrl: doctorPortalUrl(visit.id),
           recipientRole: "doctor",
         }),
@@ -87,7 +88,7 @@ export async function notifyVisitBooked(visit: VisitEmailPayload) {
             buildVisitBookedEmail({
               toName: personName(visit.bookedBy),
               toEmail: visit.bookedBy.email,
-              whenLabel: when,
+              whenLabel: whenLabel(visit.scheduledAt, visit.bookedBy.timezone),
               portalUrl: nursePortalUrl(visit.id),
               recipientRole: "nurse",
             }),
@@ -98,8 +99,6 @@ export async function notifyVisitBooked(visit: VisitEmailPayload) {
 }
 
 export async function notifyVisitReminder(visit: VisitEmailPayload) {
-  const when = whenLabel(visit.scheduledAt)
-
   await Promise.all([
     notifyVisitReminderInApp(visit),
     safeSend(`visit-reminder doctor ${visit.id}`, () =>
@@ -107,7 +106,7 @@ export async function notifyVisitReminder(visit: VisitEmailPayload) {
         buildVisitReminderEmail({
           toName: personName(visit.provider),
           toEmail: visit.provider.email,
-          whenLabel: when,
+          whenLabel: whenLabel(visit.scheduledAt, visit.provider.timezone),
           portalUrl: doctorPortalUrl(visit.id),
         }),
       ),
@@ -118,7 +117,7 @@ export async function notifyVisitReminder(visit: VisitEmailPayload) {
             buildVisitReminderEmail({
               toName: personName(visit.bookedBy),
               toEmail: visit.bookedBy.email,
-              whenLabel: when,
+              whenLabel: whenLabel(visit.scheduledAt, visit.bookedBy.timezone),
               portalUrl: nursePortalUrl(visit.id),
             }),
           ),
@@ -131,7 +130,6 @@ export async function notifyVisitStatus(
   visit: VisitEmailPayload,
   status: "cancelled" | "completed" | "missed",
 ) {
-  const when = whenLabel(visit.scheduledAt)
   const statusLabel =
     status === "cancelled"
       ? "Cancelled"
@@ -161,7 +159,7 @@ export async function notifyVisitStatus(
           buildVisitStatusEmail({
             toName: personName(item.user),
             toEmail: item.user.email,
-            whenLabel: when,
+            whenLabel: whenLabel(visit.scheduledAt, item.user.timezone),
             statusLabel,
             portalUrl: item.portalUrl,
           }),

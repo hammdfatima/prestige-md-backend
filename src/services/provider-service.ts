@@ -158,7 +158,6 @@ export async function createProvider(
       education: input.education.trim(),
       yearsExperience: input.yearsExperience.trim(),
       primaryLanguage: input.primaryLanguage.trim(),
-      availability: input.availability.trim(),
       invitedAt: new Date(),
       facility: { connect: { id: primaryFacilityId } },
       facilityLinks: {

@@ -34,17 +34,18 @@ import type { TokenPayload } from "~/types";
 const visitInclude = {
   patient: { include: patientInclude },
   provider: true,
-  bookedBy: {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      avatarUrl: true,
-      email: true,
-      phone: true,
-      employeeId: true,
-    },
-  },
+      bookedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+          email: true,
+          phone: true,
+          employeeId: true,
+          timezone: true,
+        },
+      },
 } as const;
 
 function toVisitEmailPayload(visit: {
@@ -59,6 +60,7 @@ function toVisitEmailPayload(visit: {
     firstName: string;
     lastName: string;
     email: string;
+    timezone?: string | null;
   };
 }): VisitEmailPayload {
   return {
@@ -76,8 +78,15 @@ function toVisitEmailPayload(visit: {
       firstName: visit.provider.firstName,
       lastName: visit.provider.lastName,
       email: visit.provider.email,
+      timezone: visit.provider.timezone ?? null,
     },
-    bookedBy: visit.bookedBy,
+    bookedBy: {
+      id: visit.bookedBy.id,
+      firstName: visit.bookedBy.firstName,
+      lastName: visit.bookedBy.lastName,
+      email: visit.bookedBy.email,
+      timezone: visit.bookedBy.timezone ?? null,
+    },
   };
 }
 

@@ -3,11 +3,14 @@ import type { Facility, User } from "~/generated/prisma/client";
 export type LoginAccountRef =
   | {
       kind: "user";
-      record: Pick<User, "id" | "email" | "firstName" | "lastName" | "role">;
+      record: Pick<
+        User,
+        "id" | "email" | "firstName" | "lastName" | "role" | "timezone"
+      >;
     }
   | {
       kind: "facility";
-      record: Pick<Facility, "id" | "email" | "managerName">;
+      record: Pick<Facility, "id" | "email" | "managerName" | "timezone">;
     };
 
 export type LoginNotificationContext = {
