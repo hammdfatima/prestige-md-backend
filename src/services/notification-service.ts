@@ -75,7 +75,39 @@ export async function listNotifications(auth: TokenPayload) {
     take: 40,
   })
 
-  return notifications.map(toPublic)
+  const legacyFacilityVisitIds = notifications
+    .filter(
+      (item) =>
+        item.href === "/facility/appointments" && Boolean(item.visitId),
+    )
+    .map((item) => item.visitId as string)
+
+  const patientIdByVisit =
+    legacyFacilityVisitIds.length > 0
+      ? Object.fromEntries(
+          (
+            await prisma.visit.findMany({
+              where: { id: { in: legacyFacilityVisitIds } },
+              select: { id: true, patientId: true },
+            })
+          ).map((visit) => [visit.id, visit.patientId]),
+        )
+      : ({} as Record<string, string>)
+
+  return notifications.map((notification) => {
+    const publicNotification = toPublic(notification)
+    if (
+      publicNotification.href === "/facility/appointments" &&
+      publicNotification.visitId &&
+      patientIdByVisit[publicNotification.visitId]
+    ) {
+      return {
+        ...publicNotification,
+        href: `/facility/patients/${patientIdByVisit[publicNotification.visitId]}`,
+      }
+    }
+    return publicNotification
+  })
 }
 
 export async function markNotificationRead(

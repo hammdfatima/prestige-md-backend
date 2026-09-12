@@ -53,7 +53,12 @@ function toVisitEmailPayload(visit: {
   reason: string;
   scheduledAt: Date;
   status: VisitStatus;
-  patient: { firstName: string; lastName: string; facilityId: string };
+  patient: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    facilityId: string;
+  };
   provider: User;
   bookedBy: {
     id: string;
@@ -70,6 +75,7 @@ function toVisitEmailPayload(visit: {
     status: visit.status,
     facilityId: visit.patient.facilityId,
     patient: {
+      id: visit.patient.id,
       firstName: visit.patient.firstName,
       lastName: visit.patient.lastName,
     },

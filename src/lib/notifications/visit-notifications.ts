@@ -32,8 +32,8 @@ function adminHref() {
   return `/admin/appointments`
 }
 
-function facilityHref() {
-  return `/facility/appointments`
+function facilityPatientHref(patientId: string) {
+  return `/facility/patients/${patientId}`
 }
 
 async function safeNotify(label: string, work: () => Promise<unknown>) {
@@ -64,7 +64,7 @@ async function withOrgRecipients(
       type: base[0]?.type ?? NotificationType.VISIT_BOOKED,
       title: base[0]?.title ?? "Visit update",
       body: visitWhenBody(visit.scheduledAt, facility?.timezone),
-      href: facilityHref(),
+      href: facilityPatientHref(visit.patient.id),
       visitId: visit.id,
     })
   }

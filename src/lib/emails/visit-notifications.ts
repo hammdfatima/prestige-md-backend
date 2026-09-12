@@ -28,7 +28,7 @@ export type VisitEmailPayload = {
   scheduledAt: Date
   status: VisitStatus
   facilityId: string
-  patient: { firstName: string; lastName: string }
+  patient: { id: string; firstName: string; lastName: string }
   provider: VisitEmailParticipant
   bookedBy: VisitEmailParticipant
 }
