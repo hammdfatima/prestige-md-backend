@@ -28,7 +28,6 @@ import {
   verifyPasswordResetToken,
 } from "~/lib/password-reset-token";
 import { normalizeEmail } from "~/lib/field-encryption";
-import logger from "~/lib/logger";
 import {
   readInviteType,
   verifyFacilityInviteToken,
