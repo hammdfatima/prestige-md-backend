@@ -37,6 +37,7 @@ COPY --from=builder --chown=expressjs:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=expressjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=expressjs:nodejs /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder --chown=expressjs:nodejs /app/src/generated ./src/generated
+COPY --from=builder --chown=expressjs:nodejs /app/assets ./assets
 
 USER expressjs
 EXPOSE 5000

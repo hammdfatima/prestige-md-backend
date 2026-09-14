@@ -4,7 +4,14 @@ import env from "~/env";
 
 const PASSWORD_RESET_TYPE = "password_reset";
 /** Long enough for email delivery delay + completing the form. */
-const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
+export const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
+
+export function passwordResetTtlLabel() {
+  const minutes = Math.round(PASSWORD_RESET_TTL_SECONDS / 60);
+  if (minutes < 60) return `${minutes} minutes`;
+  const hours = minutes / 60;
+  return hours === 1 ? "1 hour" : `${hours} hours`;
+}
 
 export type PasswordResetAccountKind = "user" | "facility";
 
@@ -27,7 +34,7 @@ export function createPasswordResetToken(input: {
       type: PASSWORD_RESET_TYPE,
       accountKind: input.accountKind,
       accountId: input.accountId,
-      email: input.email.toLowerCase(),
+      email: input.email.trim().toLowerCase(),
       jti,
     } satisfies PasswordResetTokenPayload,
     env.JWT_SECRET,

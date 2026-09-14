@@ -27,6 +27,8 @@ import {
   createPasswordResetToken,
   verifyPasswordResetToken,
 } from "~/lib/password-reset-token";
+import { normalizeEmail } from "~/lib/field-encryption";
+import logger from "~/lib/logger";
 import {
   readInviteType,
   verifyFacilityInviteToken,
@@ -876,6 +878,7 @@ async function tryResetPassword(
   try {
     tokenPayload = verifyPasswordResetToken(input.token);
   } catch {
+    logger.warn("Password reset rejected: invalid or expired token");
     return null;
   }
 
@@ -896,6 +899,9 @@ async function tryResetPassword(
   });
 
   if (!otp) {
+    logger.warn(
+      `Password reset rejected: no active reset challenge for ${tokenPayload.accountKind} ${tokenPayload.accountId}`,
+    );
     return null;
   }
 
@@ -909,7 +915,13 @@ async function tryResetPassword(
   ]);
 
   const account = resolveResettableAccount(user, facility);
-  if (!account || account.email !== tokenPayload.email) {
+  if (
+    !account ||
+    normalizeEmail(account.email) !== normalizeEmail(tokenPayload.email)
+  ) {
+    logger.warn(
+      `Password reset rejected: account mismatch for ${tokenPayload.accountKind} ${tokenPayload.accountId}`,
+    );
     return null;
   }
 

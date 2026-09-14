@@ -6,6 +6,7 @@ import {
   escapeHtml,
   wrapHtml,
 } from "~/lib/emails/layout"
+import { passwordResetTtlLabel } from "~/lib/password-reset-token"
 
 export function buildPasswordResetLinkEmail(input: {
   name: string
@@ -13,6 +14,7 @@ export function buildPasswordResetLinkEmail(input: {
   resetUrl: string
 }): OutboundEmail {
   const subject = "Reset your PrestigeMD password"
+  const ttlLabel = passwordResetTtlLabel()
   const text = [
     `Hi ${input.name},`,
     "",
@@ -20,7 +22,7 @@ export function buildPasswordResetLinkEmail(input: {
     "Use the secure link below to choose a new password:",
     input.resetUrl,
     "",
-    "This link expires in 10 minutes.",
+    `This link expires in ${ttlLabel}.`,
     "If you did not request a reset, you can ignore this email.",
   ].join("\n")
 
@@ -30,7 +32,7 @@ export function buildPasswordResetLinkEmail(input: {
     <p style="margin:0 0 12px">Hi ${escapeHtml(input.name)},</p>
     <p style="margin:0 0 8px">We received a request to reset your PrestigeMD password.</p>
     ${emailButton(input.resetUrl, "Reset password")}
-    <p style="margin:16px 0 0;color:#64748b;font-size:13px">This link expires in <strong>10 minutes</strong>. If you did not request a reset, you can safely ignore this email.</p>
+    <p style="margin:16px 0 0;color:#64748b;font-size:13px">This link expires in <strong>${escapeHtml(ttlLabel)}</strong>. If you did not request a reset, you can safely ignore this email.</p>
   `,
   )
 
