@@ -134,6 +134,12 @@ export const limiter = rateLimit(
   createLimiterOptions(
     "Too many requests from this IP, please try again later.",
     "global",
+    {
+      // SPA traffic (heartbeats, notifications, visits) exceeds 100/15m quickly in testing.
+      // Skip outside production for now; keep a higher ceiling when enabled.
+      max: 5_000,
+      skip: () => process.env.NODE_ENV !== "production",
+    },
   ),
 );
 
