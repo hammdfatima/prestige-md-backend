@@ -881,10 +881,12 @@ async function tryResetPassword(
     return null;
   }
 
+  // EmailOtp.code is encrypted at rest with a non-deterministic cipher, so it
+  // cannot be used in a WHERE equality. Load the active challenge (same pattern
+  // as login MFA) and compare the decrypted code to the token jti in-process.
   const otp = await prisma.emailOtp.findFirst({
     where: {
       purpose: OtpPurpose.PASSWORD_RESET,
-      code: tokenPayload.jti,
       consumedAt: null,
       expiresAt: { gt: new Date() },
       userId:
@@ -897,9 +899,9 @@ async function tryResetPassword(
     orderBy: { createdAt: "desc" },
   });
 
-  if (!otp) {
+  if (!otp || otp.code !== tokenPayload.jti) {
     logger.warn(
-      `Password reset rejected: no active reset challenge for ${tokenPayload.accountKind} ${tokenPayload.accountId}`,
+      `Password reset rejected: no matching reset challenge for ${tokenPayload.accountKind} ${tokenPayload.accountId}`,
     );
     return null;
   }
