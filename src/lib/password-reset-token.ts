@@ -3,7 +3,8 @@ import jwt from "jsonwebtoken";
 import env from "~/env";
 
 const PASSWORD_RESET_TYPE = "password_reset";
-const PASSWORD_RESET_TTL_SECONDS = 10 * 60;
+/** Long enough for email delivery delay + completing the form. */
+const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
 
 export type PasswordResetAccountKind = "user" | "facility";
 

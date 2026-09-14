@@ -10,7 +10,7 @@ export const FORGOT_PASSWORD_MESSAGE =
   "If an account exists for this email, a password reset link has been sent";
 
 export const RESET_PASSWORD_FAILURE_MESSAGE =
-  "Unable to reset password. Check your email and code, then try again.";
+  "Unable to reset password. This link may be invalid, expired, or already used. Request a new reset link and try again.";
 
 export const OTP_VERIFICATION_FAILURE_MESSAGE =
   "Unable to verify the code. Please try again or sign in again.";
